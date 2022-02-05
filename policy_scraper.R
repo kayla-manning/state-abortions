@@ -155,10 +155,16 @@ for (y in 2006:2016) {
         mutate(top = case_when(colname %in% c('instit_prov_refuse',
                                               'mandate_fetal_pain') ~ top-10,
                                colname == 'mandate_breast_cancer' ~ top-25,
-                               colname == 'state' ~ top+10,
+                               colname %in% c('indiv_prov_refuse',
+                                              'mandate_neg_psych') ~ top+15,
+                               colname %in% c('state',
+                                              'hr_wait_post_counseling') ~ top+10,
                                TRUE ~ top),
                bottom = case_when(colname %in% c('instit_prov_refuse',
                                                  'parental_involv_minors') ~ bottom+20,
+                                  colname %in% c('indiv_prov_refuse',
+                                                 'mandate_neg_psych', 
+                                                 'hr_wait_post_counseling') ~ bottom+20,
                                   colname %in% c('mandate_fetal_pain',
                                                  'mandate_breast_cancer') ~ bottom+15,
                                   colname == 'state' ~ bottom+20,
@@ -169,14 +175,14 @@ for (y in 2006:2016) {
         mutate(top = case_when(colname %in% c('instit_prov_refuse',
                                               'mandate_fetal_pain') ~ top-10,
                                colname == 'mandate_breast_cancer' ~ top-25,
-                               colname == 'state' ~ top+5,
                                TRUE ~ top),
                bottom = case_when(colname %in% c('instit_prov_refuse',
                                                  'parental_involv_minors',
                                                  'mandate_fetal_pain') ~ bottom+10,
                                   colname == 'mandate_breast_cancer' ~ bottom+5,
-                                  colname == 'state' ~ bottom-10,
-                                  TRUE ~ bottom))  
+                                  TRUE ~ bottom),
+               left = case_when(colname == 'state' ~ left-15,
+                                TRUE ~ left))  
     }
     if (y %in% c(2011, 2012)) {
       these_coords <- coords_df %>% 
@@ -305,11 +311,18 @@ for (y in 2006:2016) {
       }
       
       # assigning values to the appropriate column name
-      print(colnames_list[[p]][i])
-      print(length(clean_col))
+      # print(colnames_list[[p]][i])
+      # print(length(clean_col))
       assign(colnames_list[[p]][i], clean_col)
     }
   }
+  
+  # hard-coding in the states because 2008-2010 weren't reading in correctly
+
+  state <- c('AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 
+             'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO',
+             'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 
+             'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY')
   
   # now I want to bind all of these named vectors together
   
@@ -323,7 +336,7 @@ for (y in 2006:2016) {
   # adding to the main policy df
   
   policy_df <- bind_rows(policy_df, messy_df)
-  
+  print(paste('finished', y))
 }
 
 # adding a year column to the policy df to make it easier to read
