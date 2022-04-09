@@ -377,9 +377,9 @@
   
 }
 
-# writing e final df to a csv so that I don't have to run the scraper every time
+# writing the final df to a csv so that I don't have to run the scraper every time
 # I want the data in my environment. I'm leaving this code in the script so I
 # remember to overwrite the CSV if/when I make changes or corrections
 
-write.csv(policy_df, 'raw-data/scraped_policies.csv')
+write.csv(policy_df, 'raw-data/scraped/scraped_policies.csv')
 
