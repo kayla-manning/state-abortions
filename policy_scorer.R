@@ -62,8 +62,7 @@ write_csv(clean_policies, 'raw-data/clean_policies.csv')
 # seeing how many unique levels there are of each policy
 
 clean_policies %>% 
-  count(policy, level, score) %>% 
-  View()
+  count(policy, level, score)
 
 # now I want to use the score key alongside the policy_df to calculate a
 # hostility score for each state... 
