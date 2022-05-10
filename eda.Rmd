@@ -564,7 +564,12 @@ map_policy_df %>%
                        midpoint = 6,
                        labels = c(0, 3, 6, 9, 12)) +
   coord_fixed() +
-  labs(title = "Within-state policy scores in {closest_state}")
+  labs(title = "Within-state policy scores in {closest_state}") +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
 
 map_policy_df %>%
   ggplot() +
@@ -573,9 +578,16 @@ map_policy_df %>%
   transition_states(year) +
   scale_fill_gradient2(low = 'blue',
                        mid = 'white',
-                       high = 'red') +
+                       high = 'red',
+                       midpoint = 6,
+                       labels = c(0, 3, 6, 9, 12)) +
   coord_fixed() +
-  labs(title = "Interstate policy scores in {closest_state}")
+  labs(title = "Interstate policy scores in {closest_state}") +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
 
 # now just doing intrastate for 2010 and 2019 side-by-side
 
@@ -587,7 +599,12 @@ map_policy_df %>%
   scale_fill_gradient2(high = 'red') +
   coord_fixed() +
   facet_wrap(~year, nrow = 2)+
-  labs(title = 'Intrastate scores for 2010 and 2019')
+  labs(title = 'Intrastate scores for 2010 and 2019') +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
 
 # seeing the change in hostility
 

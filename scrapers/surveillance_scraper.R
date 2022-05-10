@@ -54,6 +54,10 @@ for (y in 2007:2019) {
       good_cols <- c('x1', 'x6', 'x7_9', 'x10_13', 'x14_15', 'x16_17', 
                      'x18_20', 'x21', 'total_reported')
     }
+    else if (y == 2006) {
+      good_cols <- c('x1', 'x8', 'x9_10', 'x11_12', 'x13_15', 'x16_20', 'x21',
+                     )
+    }
     
     # finally calling the sheet
     
@@ -65,6 +69,9 @@ for (y in 2007:2019) {
     
     if (length(colnames(this_yr_df)) == 15) {
       colnames(this_yr_df)[14] <- 'total_reported'
+    }
+    else if (y == 2006) {
+      this_yr_df <- rename(this_yr_df, total_reported = total)
     }
     else {
       colnames(this_yr_df)[length(colnames(this_yr_df))] <- 'total_reported'

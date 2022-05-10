@@ -30,6 +30,14 @@ score_key <- policy_levels %>%
   ungroup() %>% 
   select(-c(harsh_rank, n_ranks))
 
+score_key %>% 
+  select(-policy) %>% 
+  mutate(score = round(score, 3)) %>% 
+  knitr::kable(booktabs = TRUE,
+               caption = 'Points allotted to policy levels') %>% 
+  kableExtra::pack_rows(index = table(fct_inorder(score_key$policy))) %>% 
+  kableExtra::kable_minimal()
+
 # working on cleaning to get rid of non-alphanumeric characters (but then
 # putting the triangles back)... also getting rid of Alaska & Hawaii since their
 # distance measurementswill likely bias any analyses
@@ -126,7 +134,7 @@ pops <- read_csv('raw-data/downloads/statepops2010_2019.csv') %>%
 
 weight_df <- dist_df %>% 
   select(-c(Hawaii, Alaska)) %>% 
-  filter(!state %in% c('Hawaii', 'Alaska')) %>% 
+  filter(!state %in% c('Hawaii', 'Alaska', 'Puerto Rico')) %>% 
   mutate(across(Alabama:ncol(.), function(x) 1 / x^2)) %>% 
   mutate(across(Alabama:ncol(.), function(x) ifelse(is.infinite(x), 0, x))) %>% 
   pivot_longer(Alabama:ncol(.), names_to = 'state2', values_to = 'weight') %>%
@@ -135,15 +143,19 @@ weight_df <- dist_df %>%
   select(-pop)
   
 # joining weight df with score df, computing score by summing weights*intrastate
-# score across all 50 states for each state & then normalizing
+# score across all 50 states for each state & then normalizing... making sure
+# weights sum to 1 for each state/year pairing
 
 interstate_scores_df <- weight_df %>% 
   mutate(state2 = state.abb[match(state2, state.name)]) %>% 
   inner_join(scores_df, by = c('state2' = 'state', 'year')) %>% 
   group_by(state, year) %>% 
-  summarise(interstate_score = sum(weight * hostility_score)) %>% 
-  mutate(interstate_score = (interstate_score - mean(interstate_score)) / 
-           sd(interstate_score))
+  mutate(weight_norm = weight / sum(weight)) %>% 
+  summarise(interstate_score = sum(weight_norm * hostility_score),
+            .groups = 'drop') 
+# %>%
+#   mutate(interstate_score = (interstate_score - mean(interstate_score)) /
+#            sd(interstate_score))
 
 # combining all scores
 
@@ -159,7 +171,7 @@ all_scores %>%
   pivot_longer(intrastate_score:interstate_score) %>% 
   ggplot(aes(value)) +
   geom_histogram() +
-  facet_wrap(~name)
+  facet_wrap(~name, scales = 'free')
 
 all_scores %>% 
   filter(is.na(interstate_score))
