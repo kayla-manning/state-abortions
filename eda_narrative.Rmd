@@ -302,15 +302,10 @@ abortion_counts %>%
 
 ```{r missing_gestation_breakdown}
 
-# checking proportion of observations in each category that are NA for each
-# state (so not reported or a negligible amount were reported)
+# reading in data that lists the state-year observations that did not report any
+# gestation data
 
-gestation %>% 
-  pivot_longer(x0_13:x21, names_to = 'window') %>% 
-  mutate(value = is.na(value)) %>% 
-  group_by(state, window) %>% 
-  summarize(prop_na = mean(value), .groups = 'drop') %>% 
-  pivot_wider(names_from = window, values_from = prop_na)
+nonreport_gestation <- read_excel('raw-data/helper/nonreport_gestation.xlsx')
 
 # WY is excluded from every year except 2007 and 2019... what is the difference
 # between NA and 0? it's because WY only reported for <=8 but had negligible
@@ -321,15 +316,17 @@ gestation %>%
 gestation %>% 
   filter(state == 'Wyoming')
 
-# creating a table similar to the one I created for gestational data
+# getting states that are only missing certain years & states that are missing
+# all years (for future reference when comparing different subsets of
+# missingness)
 
-# getting states that are only missing certain years
-
-missing_some_gestation <- gestation %>% 
-  select(state, year) %>% 
-  group_by(state) %>% 
-  count() %>% 
-  filter(n != 13) %>% 
+missing_some_gestation <- nonreport_gestation %>% 
+  count(state) %>% 
+  filter(n < 10) %>% 
+  pull(state)
+missing_all_gestation <- nonreport_gestation %>% 
+  count(state) %>% 
+  filter(n == 10) %>% 
   pull(state)
 
 # creating table for all missing
@@ -341,14 +338,9 @@ missing_all_df <- tibble(state = rep(missing_all_gestation, each = length(2007:2
 
 # creating table for some missing & then joining
 
-gestation %>% 
-  filter(state %in% missing_some_gestation) %>% 
-  filter(is.na(x0_13) | is.na(x14_15) | is.na(x16_17) | 
-           is.na(x18_20) | is.na(x21)) %>% 
+nonreport_gestation %>% 
   dcast(state ~ year) %>% 
-  mutate(across(`2007`:`2019`, function(x) ifelse(is.na(x), 'X', ''))) %>% 
-  bind_rows(missing_all_df) %>% 
-  filter(state != 'District of Columbia') %>% 
+  mutate(across(`2010`:`2019`, function(x) ifelse(is.na(x), '', 'X'))) %>% 
   arrange(state) %>% 
   rename(State = state) %>% 
   kable(caption = 'States that do not report gestational data to CDC',
@@ -362,14 +354,19 @@ gestation %>%
 # missing abortion
 
 options(scipen = 999)
+data_by_nonreport_gestation <- combined %>% 
+  inner_join(nonreport_gestation, by = c('state_location' = 'state', 'year')) %>% 
+  mutate(nonreport_gestation = TRUE)
 data_by_missingness <- combined %>% 
   full_join(gestation, by = c('state_location' = 'state', 'year')) %>% 
-  mutate(nonreport_gestation = is.na(x0_13) | is.na(x14_15) | 
-           is.na(x16_17) | is.na(x18_20) | is.na(x21),
+  full_join(data_by_nonreport_gestation) %>% 
+  mutate(nonreport_gestation = state_location %in% missing_some_gestation,
          nonreport_abortions = is.na(total_reported),
          nonreport = case_when(nonreport_abortions ~ 'nonreport_abortions',
                                nonreport_gestation & !nonreport_abortions ~ 'nonreport_gestation',
                                TRUE ~ 'report_all')) %>% 
+  filter(!state_location %in% c('District of Columbia', 'Hawaii', 'Alaska'),
+         !str_detect(state_location, 'Total')) %>% 
   select(-c(state_location, year, within_between, x0_13:x21,
             ie_ratio:nonres_res_ratio, total_reported,
             nonreport_gestation:nonreport_abortions))
@@ -382,16 +379,15 @@ missing_balance_check <-  data_by_missingness %>%
 
 state_nonreport_cats <- combined %>% 
   full_join(gestation, by = c('state_location' = 'state', 'year')) %>% 
-  filter(!state_location %in% c('Alaska', 'Hawaii', 'District of Columbia',
-                                'New York City'),
-         !str_detect(state_location, 'Total')) %>% 
-  mutate(nonreport_gestation = is.na(x0_13) | is.na(x14_15) | 
-           is.na(x16_17) | is.na(x18_20) | is.na(x21),
+  full_join(data_by_nonreport_gestation) %>% 
+  mutate(nonreport_gestation = state_location %in% missing_some_gestation,
          nonreport_abortions = is.na(total_reported),
          nonreport = case_when(nonreport_abortions ~ 'nonreport_abortions',
                                nonreport_gestation & !nonreport_abortions ~ 'nonreport_gestation',
                                TRUE ~ 'report_all')) %>% 
   select(state_location, nonreport) %>% 
+  filter(!state_location %in% c('District of Columbia', 'Hawaii', 'Alaska'),
+         !str_detect(state_location, 'Total')) %>% 
   distinct() %>% 
   group_by(nonreport) %>% 
   nest()
@@ -694,7 +690,7 @@ exports <- abortion_long %>%
 ie_df <- inner_join(imports, exports, 
            by = c('state_location' = 'state_residence', 
                   'year')) %>% 
-  filter(exports != 0) %>% 
+  filter(exports != 0) %>%
   mutate(ie_ratio = imports / exports) %>% 
   filter(!state_location %in% c('Hawaii', 'Alaska', 'District of Columbia'),
          imports != 0)
