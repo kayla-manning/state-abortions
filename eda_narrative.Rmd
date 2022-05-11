@@ -43,17 +43,23 @@ knitr::opts_chunk$set(message = FALSE,
   library(transformr)
 }
 
-# data <3
+# individual datasets that will be useful for different visualizations
 
 {
-  # reading in gestational data that I scraped
+  # reading in gestational data that I scraped (with granular windows)
 
   gestation <- read_csv('raw-data/scraped/gestational_combined.csv') %>% 
     select(-X1) %>% distinct() %>% 
     mutate(state = ifelse(state == 'New York State', 'New York', state))
   
-  # looping through the different excel sheets to get the abortion count data
+  # reading in the raw policy data
   
+  policies <- read_csv('raw-data/clean_policies.csv')
+  
+  # looping through the different excel sheets to get the abortion count data (I
+  # want the raw, uncleaned data so I can see which setates have "**" next to
+  # their names, indicating missingness/nonreporting)
+    
   {
     abortion_counts <- tibble()
     for (y in 2010:2019) {
@@ -62,157 +68,31 @@ knitr::opts_chunk$set(message = FALSE,
         select(-1) %>% 
         clean_names() %>% 
         mutate(year = y) %>% 
-        rename(state_location = state_area) %>% 
-        select(state_location, year, everything())
+        rename(state = state_area) %>% 
+        select(state, year, everything())
       abortion_counts <- bind_rows(abortion_counts, storage)
     }
-  }
-  
-  # reading in the birth & policy data
-  
-  births <- read.delim('raw-data/downloads/births_2007-2020.txt') %>% 
-    clean_names() %>% 
-    select(-c(notes, state_code, year_code))
-  policies <- read_csv('raw-data/clean_policies.csv')
-  policy_scores <- read_csv('raw-data/policy_scores.csv')
-  
-  # getting control variables together
-  {
     
-    # individual dfs
-    
-    {
-      # presidential data for a control variable
-    
-      prez <- read_csv('raw-data/downloads/presidential_votes.csv') %>% 
-        filter(!writein) %>% 
-        filter(party_simplified %in% c('DEMOCRAT', 'REPUBLICAN')) %>% 
-        select(year, state, party_simplified, candidatevotes) %>% 
-        pivot_wider(names_from = party_simplified, values_from = candidatevotes) %>% 
-        mutate(dem_2party = DEMOCRAT / (DEMOCRAT + REPUBLICAN),
-               state = str_replace_all(str_to_title(state), ' Of ', ' of ')) %>% 
-        select(year, state, dem_2party) 
-      
-      # cleaning the income data... filtering to get appropriate year data when
-      # there's a clear right answer (2017)... when there's conflicting numbers,
-      # I will take a weighted average based on the addresses surveyed for each
-      # (2013)
+    # replacing missing data with NA values
 
-      
-      income <- read_excel('raw-data/downloads/household_income.xlsx', skip = 7) %>% 
-        clean_names() %>% 
-        select(state, seq(2, ncol(.), by = 2)) %>% 
-        slice(-1) %>% 
-        slice(1:52) %>% 
-        mutate(across(x2020:ncol(.), as.numeric)) %>% 
-        mutate(x2013 = (68/98) * x2013_38 + (30/98) * x2013_39) %>% 
-        pivot_longer(x2020:ncol(.), names_to = 'year', values_to = 'hh_income') %>% 
-        filter(!year %in% c('x2017', 'x2013_38', 'x2013_39')) %>% 
-        mutate(year = str_replace_all(str_remove_all(year, 'x'), '_', ' '),
-               year = as.numeric(str_sub(year, 1, 4)))
-      
-      # getting population isolated to make life easier
-      
-      pops <- select(births, state, year, total_population)
-      
-      # education for % with bachelor's degree
-      
-      pct_bachelors <- read_excel('raw-data/downloads/bachelors-degree-holders-per-25-44-year-olds.xlsx', 
-             skip = 2) %>% 
-        clean_names() %>% 
-        select(x1, 
-               bachelors_degree_holders_individuals_25_44_years_old_percent:ncol(.)) %>% 
-        row_to_names(1) %>% 
-        clean_names() %>% 
-        select(state, x2010:x2019) %>% 
-        pivot_longer(x2010:x2019, names_to = 'year', values_to = 'pct_bachelors') %>% 
-        mutate(year = parse_number(year))
-      
-      # race / ethnicity (want percent non-white and percent hispanic)...
-      # origin==2 is Hispanic, race==1 means white alone or in combination, and
-      # origin==0 is total Hispanic+non-Hispanic
-      
-      {
-        hisp_or_white <- read_csv('raw-data/downloads/state_race_ethnicity.csv') %>% 
-          clean_names() %>% 
-          filter(sex == 0,
-                 (origin == 2 | race == 1)) %>% 
-          select(-c(census2010pop:estimatesbase2010)) %>%
-          pivot_longer(popestimate2010:popestimate2019, names_to = 'year', 
-                       values_to = 'popestimate') %>% 
-          group_by(name, origin, race, year) %>% 
-          summarise(popestimate = sum(popestimate)) %>% 
-          ungroup() %>% 
-          mutate(year = parse_number(year)) %>% 
-          rename(state = name)
-        race_controls <- hisp_or_white %>% 
-          filter(origin == 2) %>% 
-          group_by(state, year) %>% 
-          summarize(hisp_popestimate = sum(popestimate)) %>% 
-          inner_join(hisp_or_white %>% 
-                       filter(race == 1, 
-                              origin == 0) %>% 
-                       group_by(state, year) %>% 
-                       summarize(white_popestimate = sum(popestimate)),
-                     by = c('state', 'year')) %>% 
-          inner_join(pops, by = c('state', 'year')) %>% 
-          mutate(prop_hisp = hisp_popestimate / total_population,
-                 prop_nonwhite = 1 - (white_popestimate / total_population)) %>% 
-          select(state, year, prop_hisp, prop_nonwhite)
-      }
-      
-    }
+    abortion_counts <- abortion_counts %>% 
+    mutate(across(everything(), function(x) na_if(x, '--')))
+    
   }
-    
-    # combining the controls
-    
-  {
-    controls <- pct_bachelors %>% 
-        inner_join(pops, by = c('state', 'year')) %>% 
-        inner_join(race_controls, by = c('state', 'year')) %>% 
-        inner_join(income, by = c('state', 'year')) %>% 
-        left_join(dem2party, by = c('state', 'year')) %>% 
-        arrange(state, year) %>% 
-        mutate(dem_2party = ifelse(year %in% 2010:2011, 
-                                   map2_dbl(state, year, 
-                                     ~ ifelse(.y %in% 2010:2011, 
-                                              dem2party$dem_2party[dem2party$state == .x &
-                                                          dem2party$year == 2008],
-                                              dem_2party)),
-                                   dem_2party),
-               dem_2party = na.locf(dem_2party))
-    }
-  
-  # data with everything combined... note that this Rmd will clean the data used
-  # to make this df (and I wrote this csv in the final_df chunk), so things will
-  # be redundant
-  
-  combined <- read_csv('raw-data/combined_data.csv')
-  
 }
+
+# data with everything combined... note that this Rmd will clean the data used
+# to make this df (and I wrote this csv in the final_df chunk), so things will
+# be redundant
+
+combined <- read_csv('raw-data/combined_data.csv') %>% 
+  mutate(within_between = fct_relevel(within_between,
+                                     'low-low', 'low-med', 'low-high', 
+                                     'med-low', 'med-med', 'med-high', 
+                                     'high-low', 'high-med', 'high-high'))
   
 ```
 
-```{r abortion_long}
-
-# replacing missing data with NA values
-
-abortion_counts <- abortion_counts %>% 
-  mutate(across(everything(), function(x) na_if(x, '--')))
-
-# converting df to long format
-
-abortion_long <- abortion_counts %>% 
-  pivot_longer(alabama:ncol(.), 
-               names_to = 'state_residence', 
-               values_to = 'count') %>% 
-  mutate(state_residence = str_replace_all(state_residence, '_', ' ')) %>% 
-  mutate(across(c(state_location, state_residence), str_to_title),
-         count = as.integer(count)) %>% 
-  mutate(across(c(state_location, state_residence), 
-                function(x) str_replace(x, ' Of ', ' of ')))
-
-```
 
 # Data
 
@@ -229,15 +109,14 @@ abortion_long <- abortion_counts %>%
 # abortions... it is an issue that CA didn't report though because they would
 # likely have a high number since they're very democratic
 
-nonreporting_states <- c('California', 'District of Columbia', 
-                         'Florida', 'Maryland', 'New Hampshire')
+nonreporting_states <- c('California', 'Florida', 'Maryland', 'New Hampshire')
 nonreport_years_df <- abortion_counts %>% 
-  filter(str_detect(state_location, fixed('**'))) %>% 
-  select(state_location, year) %>% 
-  group_by(state_location) %>% 
+  filter(str_detect(state, fixed('**'))) %>% 
+  select(state, year) %>% 
+  group_by(state) %>% 
   summarise(years = list(unique(year)))
 
-missing_states <- sapply(nonreport_years_df$state_location, 
+missing_states <- sapply(nonreport_years_df$state, 
        function (x) str_replace_all(str_to_lower(str_remove_all(x, 
                                                                 fixed('*'))), 
                                     ' ', '_'))
@@ -275,26 +154,6 @@ missing_state_yr_table %>%
   rename(State = state) %>% 
   kable(caption = 'States that do not report their abortion counts to CDC',
         booktabs = TRUE)
-
-# finding correlation with most recent presidential election & policy scores..
-# very weakly correlated
-
-options(scipen = 999)
-abortion_counts %>% 
-  mutate(nonreport = str_detect(state_location, fixed('**')),
-         state_location = str_remove_all(state_location, fixed ('*')),
-         state_location = ifelse(state_location == 'New York State',
-                                 'New York',
-                                 state_location)) %>% 
-  select(state_location, year, nonreport) %>% 
-  inner_join(combined, by = c('state_location', 'year')) %>% 
-  select(-c(state_location, year, within_between)) %>% 
-  group_by(nonreport) %>% 
-  summarise_all(function(x) mean(x, na.rm = TRUE)) %>% 
-  pivot_longer(ie_ratio:ncol(.)) %>% 
-  pivot_wider(names_from = nonreport, values_from = value,
-              names_prefix = 'nonreport_abortions_') %>% 
-  arrange(nonreport_abortions_TRUE)
 
 ```
 
@@ -355,45 +214,43 @@ nonreport_gestation %>%
 
 options(scipen = 999)
 data_by_nonreport_gestation <- combined %>% 
-  inner_join(nonreport_gestation, by = c('state_location' = 'state', 'year')) %>% 
+  inner_join(nonreport_gestation, by = c('state' = 'state', 'year')) %>% 
   mutate(nonreport_gestation = TRUE)
 data_by_missingness <- combined %>% 
-  full_join(gestation, by = c('state_location' = 'state', 'year')) %>% 
+  full_join(gestation, by = c('state' = 'state', 'year')) %>% 
   full_join(data_by_nonreport_gestation) %>% 
-  mutate(nonreport_gestation = state_location %in% missing_some_gestation,
+  mutate(nonreport_gestation = state %in% missing_some_gestation,
          nonreport_abortions = is.na(total_reported),
          nonreport = case_when(nonreport_abortions ~ 'nonreport_abortions',
                                nonreport_gestation & !nonreport_abortions ~ 'nonreport_gestation',
                                TRUE ~ 'report_all')) %>% 
-  filter(!state_location %in% c('District of Columbia', 'Hawaii', 'Alaska'),
-         !str_detect(state_location, 'Total')) %>% 
-  select(-c(state_location, year, within_between, x0_13:x21,
-            ie_ratio:nonres_res_ratio, total_reported,
-            nonreport_gestation:nonreport_abortions))
+  filter(!state %in% c('District of Columbia', 'Hawaii', 'Alaska'),
+         !str_detect(state, 'Total')) %>% 
+  select(-c(state:nonres_res_ratio, within_between, x0_13:nonreport_abortions))
 missing_balance_check <-  data_by_missingness %>% 
   group_by(nonreport) %>% 
   summarise_all(function(x) mean(x, na.rm = TRUE)) %>% 
-  pivot_longer(intrastate_score:ncol(.), names_to = 'statistic', values_to = 'average')
+  pivot_longer(2:ncol(.), names_to = 'statistic', values_to = 'average')
 
 # getting list of states in each category
 
 state_nonreport_cats <- combined %>% 
-  full_join(gestation, by = c('state_location' = 'state', 'year')) %>% 
+  full_join(gestation, by = c('state' = 'state', 'year')) %>% 
   full_join(data_by_nonreport_gestation) %>% 
-  mutate(nonreport_gestation = state_location %in% missing_some_gestation,
+  mutate(nonreport_gestation = state %in% missing_some_gestation,
          nonreport_abortions = is.na(total_reported),
          nonreport = case_when(nonreport_abortions ~ 'nonreport_abortions',
                                nonreport_gestation & !nonreport_abortions ~ 'nonreport_gestation',
                                TRUE ~ 'report_all')) %>% 
-  select(state_location, nonreport) %>% 
-  filter(!state_location %in% c('District of Columbia', 'Hawaii', 'Alaska'),
-         !str_detect(state_location, 'Total')) %>% 
+  select(state, nonreport) %>% 
+  filter(!state %in% c('District of Columbia', 'Hawaii', 'Alaska'),
+         !str_detect(state, 'Total')) %>% 
   distinct() %>% 
   group_by(nonreport) %>% 
   nest()
 
 get_state_list <- function (x) {
-  paste(state_nonreport_cats$data[state_nonreport_cats$nonreport == x][[1]]$state_location,
+  paste(state_nonreport_cats$data[state_nonreport_cats$nonreport == x][[1]]$state,
         collapse = ', ')
 }
 tibble(report_all = get_state_list('report_all'),
@@ -411,6 +268,9 @@ missing_balance_check %>%
   labs(title = 'Examining missingness categories',
        subtitle = 'Mean value for each variable within each category') +
   theme_minimal()
+
+# printing out a table with the mean values for each group and p-value for
+# analysis of variance
 
 options(scipen = 999)
 missing_balance_check %>% 
@@ -434,7 +294,7 @@ missing_balance_check %>%
   mutate(across(nonreport_abortions:report_all, function(x) round(x, 3))) %>% 
   arrange(desc(pvalue)) %>% 
   kable(booktabs = TRUE,
-        caption = 'Comparing states with and without missing data')
+        caption = 'Comparing state-year observations with and without missing data')
 
 ```
 
@@ -487,7 +347,7 @@ policies %>%
 
 # points allotted to each level of policy
 
-clean_policies %>% 
+policies %>% 
   select(policy, level, score) %>% 
   distinct() %>% 
   arrange(policy, desc(score)) %>% 
@@ -500,13 +360,13 @@ clean_policies %>%
 
 # want to take a look at the overall distributions
 
-policy_scores %>% 
+combined %>% 
   ggplot(aes(intrastate_score)) +
   geom_histogram() +
   theme_minimal() +
   labs(title = 'Within-state policy scores')
 
-policy_scores %>% 
+combined %>% 
   ggplot(aes(interstate_score)) +
   geom_histogram() +
   theme_minimal() +
@@ -516,31 +376,9 @@ policy_scores %>%
 
 ```{r category_df}
 
-# putting states in categories similar to Kaufman et al.
-
-category_placements <- policy_scores %>% 
-  pivot_longer(intrastate_score:interstate_score) %>% 
-  group_by(name) %>% 
-  mutate(first_cutoff = quantile(value, 1/3),
-         second_cutoff = quantile(value, 2/3)) %>% 
-  mutate(low = value <= first_cutoff,
-         med = value > first_cutoff & value <= second_cutoff,
-         high = value > second_cutoff) %>% 
-  select(-c(first_cutoff, second_cutoff, value)) %>% 
-  pivot_longer(low:high, names_to = 'category', values_to = 'placement') %>% 
-  filter(placement) %>% 
-  select(-placement) %>% 
-  pivot_wider(names_from = name, values_from = category) %>% 
-  mutate(within_between = paste(intrastate_score, interstate_score, sep = '-'),
-         within_between = fct_relevel(within_between,
-                                      levels = c('low-low', 'low-med', 'low-high',
-                                                 'med-low', 'med-med', 'med-high',
-                                                 'high-low', 'high-med', 'high-high'))) %>% 
-  select(-c(intrastate_score, interstate_score))
-
 # getting a table that has the cutoffs
 
-category_cutoffs <- policy_scores %>% 
+category_cutoffs <- combined %>% 
   pivot_longer(intrastate_score:interstate_score) %>% 
   group_by(name) %>% 
   mutate(min = min(value),
@@ -558,98 +396,111 @@ category_cutoffs %>%
 
 ```{r category_viz}
 
-# graphing the distributions of the cutoffs
-
-policy_scores %>% 
+# graphing the distributions of the cutoffs (side-by-side histograms of each
+# score)
+{
+  combined %>% 
   pivot_longer(intrastate_score:interstate_score) %>% 
   ggplot() +
   geom_histogram(aes(value)) +
   facet_wrap(~name) +
-  geom_vline(data = filter(pivot_longer(policy_scores, intrastate_score:interstate_score),
+  geom_vline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
                     name == 'intrastate_score'),
              aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'intrastate_score']),
              color = 'red') +
-  geom_vline(data = filter(pivot_longer(policy_scores, intrastate_score:interstate_score),
+  geom_vline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
                     name == 'intrastate_score'),
              aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'intrastate_score']),
              color = 'red') +
-  geom_vline(data = filter(pivot_longer(policy_scores, intrastate_score:interstate_score),
+  geom_vline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
                     name == 'interstate_score'),
              aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'interstate_score']),
              color = 'red')+
-  geom_vline(data = filter(pivot_longer(policy_scores, intrastate_score:interstate_score),
+  geom_vline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
                     name == 'interstate_score'),
              aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'interstate_score']),
              color = 'red') +
   theme_minimal() +
   labs(title = 'Cutoffs for policy score categories',
        subtitle = 'Based on terciles of the score distributions')
+}
 
-# visualizing on 2d plot
-
-policy_scores %>% 
-  pivot_longer(intrastate_score:interstate_score) %>% 
-  group_by(name) %>% 
-  mutate(first_cutoff = quantile(value, 1/3),
-         second_cutoff = quantile(value, 2/3)) %>% 
-  mutate(level = case_when(value <= first_cutoff ~ 'low',
-                           value > first_cutoff & value <= second_cutoff ~ 'med',
-                           value > second_cutoff ~ 'high')) %>% 
-  select(-c(first_cutoff, second_cutoff)) %>% 
-  group_by(state, year) %>% 
-  mutate(score_type = name) %>% 
-  pivot_wider(names_from = name, values_from = level) %>% 
-  pivot_wider(names_from = score_type, values_from = value, names_prefix = 'score') %>% 
-  mutate(across(c(interstate_score, scoreinterstate_score),
-                function(x) na.locf(x, fromLast = TRUE))) %>% 
-  mutate(across(c(intrastate_score, scoreintrastate_score),
-                function(x) na.locf(x))) %>% 
-  mutate(within_between = paste(intrastate_score, interstate_score, sep = '-')) %>% 
-  select(-c(intrastate_score, interstate_score)) %>% 
-  rename(interstate_score = scoreinterstate_score,
-         intrastate_score = scoreintrastate_score) %>% 
-  ggplot(aes(intrastate_score, interstate_score, color = fct_relevel(within_between,
-                                      levels = c('low-low', 'low-med', 'low-high',
-                                                 'med-low', 'med-med', 'med-high',
-                                                 'high-low', 'high-med', 'high-high')))) +
-  geom_point() +
-  geom_vline(data = filter(pivot_longer(policy_scores, intrastate_score:interstate_score),
-                    name == 'intrastate_score'),
-             aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'intrastate_score']),
-             color = 'red') +
-  geom_vline(data = filter(pivot_longer(policy_scores, intrastate_score:interstate_score),
-                    name == 'intrastate_score'),
-             aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'intrastate_score']),
-             color = 'red') +
-  geom_hline(data = filter(pivot_longer(policy_scores, intrastate_score:interstate_score),
-                    name == 'interstate_score'),
-             aes(yintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'interstate_score']),
-             color = 'red')+
-  geom_hline(data = filter(pivot_longer(policy_scores, intrastate_score:interstate_score),
-                    name == 'interstate_score'),
-             aes(yintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'interstate_score']),
-             color = 'red') +
-  theme_minimal() +
-  labs(title = 'Cutoffs for policy score categories',
-       subtitle = 'Based on terciles of the score distributions',
-       color = 'within_between')
+# visualizing on 2d plot (scatterplot with intrastate on x and interstate on y)
+{
+  combined %>% 
+    pivot_longer(intrastate_score:interstate_score) %>% 
+    group_by(name) %>% 
+    mutate(first_cutoff = quantile(value, 1/3),
+           second_cutoff = quantile(value, 2/3)) %>% 
+    mutate(level = case_when(value <= first_cutoff ~ 'low',
+                             value > first_cutoff & value <= second_cutoff ~ 'med',
+                             value > second_cutoff ~ 'high')) %>% 
+    select(-c(first_cutoff, second_cutoff)) %>% 
+    group_by(state, year) %>% 
+    mutate(score_type = name) %>% 
+    pivot_wider(names_from = name, values_from = level) %>% 
+    pivot_wider(names_from = score_type, values_from = value, names_prefix = 'score') %>% 
+    mutate(across(c(interstate_score, scoreinterstate_score),
+                  function(x) na.locf(x, fromLast = TRUE))) %>% 
+    mutate(across(c(intrastate_score, scoreintrastate_score),
+                  function(x) na.locf(x))) %>% 
+    mutate(within_between = paste(intrastate_score, interstate_score, sep = '-')) %>% 
+    select(-c(intrastate_score, interstate_score)) %>% 
+    rename(interstate_score = scoreinterstate_score,
+           intrastate_score = scoreintrastate_score) %>% 
+    ggplot(aes(intrastate_score, interstate_score, color = fct_relevel(within_between,
+                                        levels = c('low-low', 'low-med', 'low-high',
+                                                   'med-low', 'med-med', 'med-high',
+                                                   'high-low', 'high-med', 'high-high')))) +
+    geom_point() +
+    geom_vline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
+                      name == 'intrastate_score'),
+               aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'intrastate_score']),
+               color = 'red') +
+    geom_vline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
+                      name == 'intrastate_score'),
+               aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'intrastate_score']),
+               color = 'red') +
+    geom_hline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
+                      name == 'interstate_score'),
+               aes(yintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'interstate_score']),
+               color = 'red')+
+    geom_hline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
+                      name == 'interstate_score'),
+               aes(yintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'interstate_score']),
+               color = 'red') +
+    theme_minimal() +
+    labs(title = 'Cutoffs for policy score categories',
+         subtitle = 'Based on terciles of the score distributions',
+         color = 'within_between')
+}
 
 # seeing overall breakdown between the categories
 
-category_placements %>% 
+combined %>% 
   count(within_between)
-category_placements %>% 
+combined %>% 
   group_by(state) %>% 
   count(within_between) %>% 
   arrange(desc(n))
-category_placements %>% 
+combined %>% 
   count(within_between) %>% 
   ggplot(aes(within_between, n)) +
   geom_col() +
-  labs(title = 'Substantial counts in each of the 9 policy categories',
+  labs(title = 'Counts of state-year observations in each of the 9 policy categories',
        x = 'Intrastate-interstate score categories') +
   theme_minimal()
 
+# seeing how categories change over time
+
+combined %>% 
+  select(within_between, year) %>% 
+  ggplot(aes(within_between)) +
+  geom_bar() +
+  facet_wrap(~year)+
+  coord_flip() +
+  labs(title = 'Increasing hostility in national landscape with time') +
+  theme_minimal()
 
 ```
 
@@ -659,56 +510,20 @@ category_placements %>%
 
 ```{r ie_ratio}
 
-# getting proportion of non-resident abortions obtained within X state (i.e.
-# abortions imported from other states)
-
-imports <- abortion_long %>% 
-  inner_join(births, by = c('state_location' = 'state', 'year')) %>% 
-  filter(state_location != state_residence,
-         !str_detect(state_residence, 'Total')) %>% 
-  group_by(state_location, year) %>% 
-  summarize(imports = sum(count, na.rm = TRUE),
-            .groups = 'drop') %>% 
-  distinct()
-
-# getting proportion of abortions obtained by residents of X state in OTHER states
-# (i.e. abortions exported to other states)
-
-exports <- abortion_long %>% 
-  inner_join(births, by = c('state_residence' = 'state', 'year')) %>% 
-  filter(state_location != state_residence,
-         !str_detect(state_residence, 'Total')) %>% 
-  group_by(state_residence, year) %>% 
-  summarize(exports = sum(count, na.rm = TRUE),
-            .groups = 'drop') %>% 
-  distinct()
-
-# computing import/export ratio for each state & year, with import and export
-# defined above... need to exclude CO from 2018 because it does not have any
-# exports reported
-
-ie_df <- inner_join(imports, exports, 
-           by = c('state_location' = 'state_residence', 
-                  'year')) %>% 
-  filter(exports != 0) %>%
-  mutate(ie_ratio = imports / exports) %>% 
-  filter(!state_location %in% c('Hawaii', 'Alaska', 'District of Columbia'),
-         imports != 0)
-
 # plotting imports vs exports
 
-ie_df %>% 
+combined %>% 
   ggplot(aes(exports, imports)) +
   geom_point() +
   labs(title = 'States that import more abortions also tend to export more abortions',
        subtitle = 
-         paste('Correlation of', round(cor(ie_df$imports, ie_df$exports), 3))) +
+         paste('Correlation of', round(cor(combined$imports, combined$exports), 3))) +
   theme_minimal() +
   geom_smooth(method = 'lm')
 
 # taking a look at the histogram... incredibly skewed
 
-ie_df %>% 
+combined %>% 
   ggplot(aes(ie_ratio)) +
     geom_histogram() +
     labs(title = 'Import / export ratio',
@@ -718,7 +533,7 @@ ie_df %>%
 # taking the log normalizes the distribution, making it much more suitable for
 # linear regression
 
-ie_df %>% 
+combined %>% 
   ggplot(aes(log(ie_ratio))) +
     geom_histogram() +
     labs(title = 'log(Import / export ratio)',
@@ -727,7 +542,7 @@ ie_df %>%
 
 # taking a look at extreme values
 
-ie_df %>% 
+combined %>% 
   arrange(desc(ie_ratio))
 
 ```
@@ -736,19 +551,9 @@ ie_df %>%
 
 ```{r nonres_res_ratio}
 
-nonres_res_df <- abortion_long %>% 
-  mutate(resident = state_location == state_residence) %>% 
-  group_by(resident, state_location, year) %>% 
-  summarise(count = sum(count, na.rm = TRUE),
-            .groups = 'drop') %>% 
-  pivot_wider(names_from = resident, values_from = count, names_prefix = 'resident') %>% 
-  mutate(nonres_res_ratio = residentFALSE / residentTRUE) %>% 
-  filter(!state_location %in% c('Hawaii', 'Alaska', 'District of Columbia')) %>% 
-  select(-c(residentFALSE:residentNA))
-
 # taking a peek at the distribution
 
-nonres_res_df %>% 
+combined %>% 
   ggplot(aes(nonres_res_ratio)) +
   geom_histogram() +
   theme_minimal() +
@@ -756,7 +561,7 @@ nonres_res_df %>%
 
 # need to figure out something to do with DC & Wyoming
 
-nonres_res_df %>% 
+combined %>% 
   arrange((nonres_res_ratio))
 
 ```
@@ -765,28 +570,12 @@ nonres_res_df %>%
 
 ```{r rates_metrics}
 
-# I want states with highest abortion rates... dropping NAs in abortion counts
-# for now
-
-abortion_rates <- abortion_long %>% 
-  inner_join(births, by = c('state_location' = 'state', 'year')) %>% 
-  # mutate(in_state = case_when(state_location == state_residence ~ 'in_state',
-  #                             str_detect(state_residence, 'Total') ~ 'total',
-  #                             TRUE ~ 'out_of_state')) %>% 
-  group_by(state_location, year, births, total_population) %>% 
-  filter(str_detect(state_residence, 'Total')) %>% 
-  summarize(abortion_per_1k_births = count / (births / 1000),
-            abortion_per_100k_pop = count / (total_population / 100000),
-            .groups = 'drop') %>% 
-  select(-births) %>% 
-  filter(!state_location %in% c('Hawaii', 'Alaska', 'District of Columbia'))
-
 # visualizing abortion rates per population & births... highly correlated. for
 # substantive reasons (since birth counts include non-residents & my question
 # has to do with abortions as a function of births rather than a function of
 # residents) & to control for female population, I will do abortions per births
 
-abortion_rates %>% 
+combined %>% 
   ggplot(aes(abortion_per_1k_births, abortion_per_100k_pop)) +
   geom_point() +
   geom_smooth(method = 'lm') +
@@ -797,68 +586,64 @@ abortion_rates %>%
                                            abortion_rates$abortion_per_1k_births,
                                            use = 'complete.obs'), 3)))
 
+# plotting histograms of the two rates
+
+combined %>% 
+  select(abortion_per_100k_pop, abortion_per_1k_births) %>% 
+  pivot_longer(everything()) %>% 
+  ggplot(aes(value)) +
+  geom_histogram() +
+  facet_wrap(~name) +
+  labs(title = 'Nearly identical distributions for different abortion rate definitions',
+       subtitle = 'Main analysis will focus on abortions as a rate of births') +
+  theme_minimal()
+
 ```
 
 ### Later-term abortions
 
 ```{r late_vs_early}
 
-# now I want to get counts for pre13 and post13... since we have these missing
-# counts, I will subtract total_report - x0_13 to get the post13 (which will
-# hopefully pick up on the abortions that were excluded for having low counts in
-# specific windows)... dropping Wyoming & SD 2019 (missing data)
-
-late_early_df <- gestation %>% 
-  filter(!state %in% c('Hawaii', 'Alaska', 'District of Columbia'),
-         !is.na(x0_13)) %>% 
-  mutate(post13 = total_reported - x0_13,
-         prop_late = post13 / total_reported) %>% 
-  rename(pre13 = x0_13) %>% 
-  select(state, year, pre13, post13) 
-
 # generating plot and getting summary stats
 
-late_early_df %>% 
-  mutate(late_early_ratio = post13 / pre13) %>% 
-  ggplot(aes(late_early_ratio)) +
+combined %>% 
+  ggplot(aes(late_to_early)) +
   geom_histogram() +
-  labs(title = 'Distribution of  post-13 to pre-13 week abortions') +
+  labs(title = 'Distribution of post-13 to pre-13 week abortions') +
   theme_minimal()
-late_early_df %>% 
-  mutate(late_early_ratio = post13 / pre13) %>% 
-  filter(late_early_ratio %in% c(min(late_early_ratio), max(late_early_ratio)))
+combined %>% 
+  filter(late_to_early %in% c(min(late_to_early), max(late_to_early)))
 
 ```
 
 ```{r combine_dep_vars}
 
-# combining all of the dataframes with data on dependent variables
+# getting simple correlation between all of the variables
 
-dep_var_df <- inner_join(ie_df, abortion_rates, by = c('state_location', 'year')) %>% 
-  inner_join(late_early_df, by = c('state_location' = 'state', 'year')) %>% 
-  mutate(late_to_early = post13 / pre13) %>% 
-  select(-c(imports, exports, pre13, post13)) %>% 
-  inner_join(nonres_res_df, by = c('state_location', 'year'))
-
-# getting simple correlation
-
-dep_var_df %>% 
-  select(-c(state_location, year)) %>% 
+combined %>% 
+  select(ie_ratio, late_to_early, abortion_per_1k_births, 
+         abortion_per_100k_pop, nonres_res_ratio) %>% 
   cor() %>% 
   kable(booktabs = TRUE,
         caption = 'Bivariate correlations between dependent variables')
-dep_var_df %>% 
-  select(-c(state_location, year)) %>% 
+combined %>% 
+  select(ie_ratio, late_to_early, abortion_per_1k_births, 
+         abortion_per_100k_pop, nonres_res_ratio) %>% 
   cor() %>% 
   ggcorrplot::ggcorrplot(hc.order = TRUE, type = "lower",
    lab = TRUE)
 
-dep_var_df %>% 
-  select(ie_ratio:nonres_res_ratio) %>% 
+# generating histograms of all of the distributions
+
+combined %>% 
+  select(ie_ratio, late_to_early, abortion_per_1k_births, 
+         abortion_per_100k_pop, nonres_res_ratio)%>% 
   pivot_longer(everything()) %>% 
   ggplot(aes(value)) +
   geom_histogram() +
-  facet_wrap(~name, scales = 'free')
+  facet_wrap(~name, scales = 'free') +
+  theme_minimal() +
+  labs(title = 'Distributions of outcome variables')
 
 ```
 
@@ -891,164 +676,3 @@ policies %>%
   arrange(desc(n)) %>% head(10)
 
 ```
-
-## Out-of-state abortions
-
-```{r out_of_state_counts}
-
-# getting top out-of-state abortions, separated by year
-
-abortion_long %>% 
-  filter(state_location != state_residence,
-         !str_detect(state_residence, 'Location'),
-         !str_detect(state_residence, 'Residence'),
-         !str_detect(state_location, 'Total')) %>% 
-  filter(!(str_detect(state_location, 'New York') & 
-             str_detect(state_residence, 'New York'))) %>% 
-  arrange(desc(count))
-
-# doing the same thing, but aggregated across all years in the data
-
-summarize <- dplyr::summarize
-abortion_long %>% 
-  filter(state_location != state_residence,
-         !str_detect(state_residence, 'Location'),
-         !str_detect(state_residence, 'Residence'),
-         !str_detect(state_location, 'Total')) %>% 
-  filter(!(str_detect(state_location, 'New York') & 
-             str_detect(state_residence, 'New York'))) %>% 
-  group_by(state_location, state_residence) %>% 
-  summarize(count = sum(count)) %>% 
-  arrange(desc(count))
-
-# also worth exploring top 10 by total by location of service
-
-abortion_long %>% 
-  filter(str_detect(state_residence, 'Total'),
-         !str_detect(state_location, 'Total')) %>% 
-  arrange(desc(count))
-
-# aggregating top locations across all years
-
-abortion_long %>% 
-  filter(str_detect(state_residence, 'Total'),
-         !str_detect(state_location, 'Total')) %>% 
-  group_by(state_location) %>% 
-  summarize(count = sum(count)) %>% 
-  arrange(desc(count))
-
-# out-of-state to in-state ratios
-
-abortion_long %>% 
-  mutate(across(c(state_residence, state_location), 
-                function (x) str_remove_all(x, fixed('*')))) %>% 
-  mutate(same_state = state_location == state_residence) %>% 
-  group_by(state_location, same_state) %>% 
-  summarise(aggregated = sum(count, na.rm = TRUE), .groups = 'drop') %>% 
-  filter(!is.na(same_state)) %>% 
-  pivot_wider(names_from = same_state, values_from = aggregated,
-              names_prefix = 'instate') %>% 
-  mutate(out_in_ratio = instateFALSE / instateTRUE) %>% 
-  arrange(desc(out_in_ratio))
-
-```
-
-## Abortion rates
-
-```{r abortion_birth_graphs}
-
-# checked and the only columns that didn't join were NYC (but NY state did) &
-# 'Total by Residence'
-
-abortion_births <- abortion_long %>% 
-  mutate(state_location = str_remove_all(state_location, '[^A-Za-z0-9 ]'),
-         state_location = str_replace_all(state_location, 'New York State', 'New York')) %>% 
-  inner_join(select(births, state, year, births, total_population), 
-             by = c('state_location' = 'state', 'year')) %>% 
-  select(year, state_location, state_residence, count, births, total_population) %>% 
-  rename(abortions = count) %>% 
-  filter(!state_location %in% c('District of Columbia', 'Hawaii', 'Alaska'),
-         state_residence == 'Total By Location of Service')
-
-# want to see which state has had the greatest change in rate across the 9 year
-# period
-
-abortion_births %>% 
-    drop_na(abortions) %>% 
-    group_by(state_location, year) %>% 
-    summarise(abortion_birth_ratio = sum(abortions) / sum(births),
-              .groups = 'drop') %>% 
-  filter(year %in% c(2010, 2019)) %>% 
-  pivot_wider(names_from = year, values_from = abortion_birth_ratio, names_prefix = 'x') %>% 
-  mutate(change = x2019-x2010,
-         state_location = fct_reorder(state_location, change)) %>% 
-  drop_na(change) %>% 
-  select(-c(x2010:x2019)) %>% 
-  arrange(desc(change)) %>% 
-  ggplot(aes(state_location, change)) +
-  geom_col() +
-  coord_flip() +
-  labs(title = 'Change in abortion-to-birth ratio from 2010 to 2019',
-       caption = 'Excludes states that did not report data for either of the two years',
-       y = 'Change in abortion rate from 2010 to 2019',
-       x = 'State of procedure') + 
-  theme_minimal()
-
-# getting minimum and maximum abortion-to-birth ratio
-
-abortion_births %>% 
-  mutate(abortion_birth_ratio = abortions / births) %>% 
-  drop_na() %>% 
-  filter(abortion_birth_ratio == max(abortion_birth_ratio) |
-           abortion_birth_ratio == min(abortion_birth_ratio))
-
-```
-
-# Baseline models
-
-```{r final_df}
-
-# combining all of our data into a single df
-
-final_df <- dep_var_df %>% 
-  right_join(policy_scores, by = c('state_location' = 'state', 'year')) %>% 
-  inner_join(category_placements, by = c('state_location' = 'state', 'year')) %>% 
-  inner_join(controls, by = c('state_location' = 'state', 'year')) %>% 
-  filter(!state_location %in% c('District of Columbia', 'Hawaii', 'Alaska'),
-         !str_detect(state_location, 'Total'))
-
-# writing to a csv for easy analysis
-
-write_csv(final_df, 'raw-data/combined_data.csv')
-
-```
-
-```{r mods}
-
-final_df %>% 
-  ggplot(aes(interstate_score, ie_ratio)) +
-  geom_point()
-final_df %>% 
-  ggplot(aes(intrastate_score, ie_ratio)) +
-  geom_point()
-
-summary(lmer(log(ie_ratio) ~ interstate_score + intrastate_score + (1|year) + (1|state_location), 
-             data = final_df))
-summary(lmer(abortion_per_1k_births ~ interstate_score + intrastate_score + 
-               (1|year) + (1|state_location), 
-             data = final_df))
-summary(lmer(nonres_res_ratio ~ interstate_score + intrastate_score + 
-               (1|year) + (1|state_location), 
-             data = final_df))
-summary(lmer(late_to_early ~ interstate_score + intrastate_score + 
-               (1|year) + (1|state_location), 
-             data = final_df))
-
-final_df %>% 
-  pivot_longer(ie_ratio:nonres_res_ratio) %>% 
-  ggplot(aes(value, within_between)) +
-  geom_boxplot() +
-  facet_wrap(~name, scales = 'free')
-
-```
-

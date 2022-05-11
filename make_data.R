@@ -66,7 +66,6 @@
     births <- read.delim('raw-data/downloads/births_2007-2020.txt') %>% 
       clean_names() %>% 
       select(-c(notes, state_code, year_code))
-    policies <- read_csv('raw-data/clean_policies.csv')
     policy_scores <- read_csv('raw-data/policy_scores.csv')
     
     # presidential data for a control variable
@@ -166,11 +165,10 @@
   {
     # import-export ratio
     {
-      # getting proportion of non-resident abortions obtained within X state (i.e.
+      # getting number of non-resident abortions obtained within X state (i.e.
       # abortions imported from other states)
       
       imports <- abortion_long %>% 
-        inner_join(births, by = c('state_location' = 'state', 'year')) %>% 
         filter(state_location != state_residence,
                !str_detect(state_residence, 'Total')) %>% 
         group_by(state_location, year) %>% 
@@ -178,11 +176,10 @@
                   .groups = 'drop') %>% 
         distinct()
       
-      # getting proportion of abortions obtained by residents of X state in OTHER states
+      # getting number of abortions obtained by residents of X state in OTHER states
       # (i.e. abortions exported to other states)
       
       exports <- abortion_long %>% 
-        inner_join(births, by = c('state_residence' = 'state', 'year')) %>% 
         filter(state_location != state_residence,
                !str_detect(state_residence, 'Total')) %>% 
         group_by(state_residence, year) %>% 
@@ -220,15 +217,11 @@
     {
       abortion_rates <- abortion_long %>% 
         inner_join(births, by = c('state_location' = 'state', 'year')) %>% 
-        # mutate(in_state = case_when(state_location == state_residence ~ 'in_state',
-        #                             str_detect(state_residence, 'Total') ~ 'total',
-        #                             TRUE ~ 'out_of_state')) %>% 
         group_by(state_location, year, births, total_population) %>% 
         filter(str_detect(state_residence, 'Total')) %>% 
         summarize(abortion_per_1k_births = count / (births / 1000),
                   abortion_per_100k_pop = count / (total_population / 100000),
                   .groups = 'drop') %>% 
-        select(-births) %>% 
         filter(!state_location %in% c('Hawaii', 'Alaska', 'District of Columbia'))
     }
     
@@ -257,7 +250,6 @@
     dep_var_df <- inner_join(ie_df, abortion_rates, by = c('state_location', 'year')) %>% 
       inner_join(late_early_df, by = c('state_location' = 'state', 'year')) %>% 
       mutate(late_to_early = post13 / pre13) %>% 
-      select(-c(imports, exports, pre13, post13)) %>% 
       inner_join(nonres_res_df, by = c('state_location', 'year'))
     
   }
@@ -380,9 +372,12 @@
   final_df <- dep_var_df %>% 
     right_join(policy_scores, by = c('state_location' = 'state', 'year')) %>% 
     inner_join(category_placements, by = c('state_location' = 'state', 'year')) %>% 
-    inner_join(controls, by = c('state_location' = 'state', 'year', 'total_population')) %>% 
+    inner_join(controls, by = c('state_location' = 'state', 'year')) %>% 
     filter(!state_location %in% c('District of Columbia', 'Hawaii', 'Alaska'),
-           !str_detect(state_location, 'Total'))
+           !str_detect(state_location, 'Total')) %>% 
+    select(-total_population.x) %>% 
+    rename(state = state_location,
+           total_population = total_population.y)
   
   # writing to a csv for easy analysis
   
