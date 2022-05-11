@@ -24,23 +24,21 @@
 - [`scraped`](raw-data/scraped): This directory contains the raw data obtained through scrapers. 
   - [`gestational_combined.csv`](raw-data/scraped/gestation_combined.csv) contains the cleaned gestational age data from the various sources.
   - [`scraped_policies.csv`](raw-data/scraped/scraped_policies.csv) contains the policy data scraped from the Internet Archive before it was processed, combined with the PDF data from [`policy_archives`](raw-data/policy_archives), and saved under [`cleaned_policies.csv`](raw-data/cleaned_policies.csv). 
+  
+### [`archive`](archive)
+This directory contains files that aren't being directly used but contain some code that might be useful in the future. For example, [`eda.Rmd`](archive/eda.Rmd) contains code to produce US maps and animations that I may want to use later. This file also contains code that ultimately went into [`eda_narrative.Rmd`](eda_narrative.Rmd).
 
-## Notes for later (and to delete when they're no longer useful)
+## Data sources
 
-
-- [`policy_cleaning.R`](policy_cleaning.R) has some code that calculates the scores from the policy data. However, I will want to clean up my methodology before it's final. right now it is a very coarse measure and I need something more well-documented and theoretically sound before I finalize the script... also, the script is not long at all, so I could probably just add it to the end of the [`policy_scraper.R`](policy_scraper.R) script
-
-### Data sources
-
-#### Policies
+### Policies
 - State policies (current): https://www.guttmacher.org/state-policy/explore/overview-abortion-laws
 
-#### Dependent variables
+### Dependent variables
 - Abortion surveillance report with gestational data (2019): https://www.cdc.gov/mmwr/volumes/70/ss/ss7009a1.htm
 - Abortions by occurrence and residence: https://www.cdc.gov/reproductivehealth/data_stats/abortion.htm
 - Births: https://wonder.cdc.gov/natality-current.html
 
-#### Control variables
+### Control variables
 - Presidential vote share: https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/42MVDX
 - Median Household Income by State: Table H-8 from https://www.census.gov/data/tables/time-series/demo/income-poverty/historical-income-households.html
 - Education data: https://ncses.nsf.gov/indicators/states/indicator/bachelors-degree-holders-per-25-44-year-olds
