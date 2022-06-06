@@ -1,0 +1,356 @@
+
+https://mgimond.github.io/Spatial/spatial-autocorrelation-in-r.html
+Stat 141 files that Alex emailed to me
+
+```{r setup}
+
+# packages
+
+{
+  library(MASS)
+  library(tidyverse)
+  library(raster)
+  library(spdep)
+  select <- dplyr::select
+}
+
+# data
+
+combined <- read_csv('raw-data/combined_data.csv') %>% 
+  inner_join(
+    read.delim('https://www2.census.gov/geo/docs/reference/cenpop2020/CenPop2020_Mean_ST.txt') %>% 
+      separate(STATEFP.STNAME.POPULATION.LATITUDE.LONGITUDE, sep = ',',
+               into = c('statefip', 'state', 'population', 'latitude', 'longitude')) %>% 
+      mutate(across(c(latitude, longitude), as.numeric)) %>% 
+      select(state, latitude, longitude), by = 'state')
+
+# getting df that drops observations with NA in predictors/outcomes
+
+nbin_df <- combined %>% 
+  drop_na(abortions, births, intrastate_score, interstate_score,
+          pct_bachelors, total_population, prop_hisp, prop_nonwhite,
+          hh_income, dem_2party)
+
+```
+
+## Neighbors and Weights
+
+States serve as the geographic units of this analysis, so I must import the pre-computed neighborhood object from GADM, which contains location information for each of the 50 states. Because this analysis is focusing on the contiguous United States, I drop Hawaii and Alaska from the observations. Then, I merge the location data with my dataframe containing the abortion data. 
+
+I create a neighbors list using `poly2nb()` from the `spdep` package, and I build a binary weight matrix from that. Creating the neighbors in this manner will classify two states as neighbors if they share a boundary. If I wish to change this in the future, I can classify two states as neighbors if their centroids lie within a specified distance using `dnearneigh()` instead of `poly2nb()`. Alternatively, I could instead use `knn2nb()` to compute $k$ neighborhood assignments based on the number of nearest neighbors.
+
+For now, this analysis will adopt the `poly2nb()` approach that focuses on shared boundaries. This approach operates under the assumption that states sharing borders are most likely to share spatial characteristics not captured by the predictors included in the model. In the case of abortion spillover, it makes sense that women will cross as few state lines as possible to obtain an abortion. One could also make the case for distance-based neighborhood classifications using `dnearneigh()`, since tight clusters of states in regions such as New England likely share many regional characteristics even if they are not direct neighbors. However, this approach creates the need to select some distance cutoff, and selecting this metric such that it will capture direct neighbors in regions with large states with distant centroids and indirect neighbors in regions with small states relies on some rather arbitrary decisions.
+
+I then convert the list of neighbors into a matrix where entry $W_{ij}$ contains the weight of the connection from state $i$ **to** state $j$. We build our weights matrix with binary weights such that $W_{ij}=1$ if $j$ is a neighbor of $i$ is zero otherwise. Then, I normalized the rows of the matrix such that each row of $B$ will sum to $1$ and $W_{ij} = \frac{B_{ij}}{\sum_{j} B_{ij}}.$
+
+```{r spatial_weights}
+
+# {
+#   {
+#     # getting spatial data for US state boundaries & subsetting out Alaska & Hawaii
+#     # (using tutorial at https://mhallwor.github.io/_pages/basics_SpatialPolygons)
+#     
+#     usa <- raster::getData('GADM', country='USA', level=1)
+#     usa <- usa[!usa$NAME_1 %in% c('Alaska', 'Hawaii'),]
+#     
+#     # merging with data
+#     
+#     usa <- merge(usa, nbin_df, 
+#                  by.x = 'NAME_1', by.y = 'state', 
+#                  duplicateGeoms = TRUE, all.x = FALSE)
+#   }
+#   
+#   # using poly2nb to create a neighbors list & from that a neighbors matrix
+#   # https://rspatial.org/raster/rosu/Chapter7.html
+#   
+#   ### ******* I MAY WANT TO ADD A SNAP ARGUMENT IN THE FUTURE TO CONSIDER BOUNDARY
+#   ### POINTS LESS THAN SNAP DISTANCE APART AS NEIGHBORS... STATES THAT DO NOT
+#   ### SHARE BOUNDARIES ARE STILL CLOSE TO ONE ANOTHER AND HAVE REASONABLE
+#   ### SPILLOVER / REGIONAL CORRELATION **********
+#   # maybe specify neighbors with dnearneigh instead?
+#   
+#   usa_contig <- poly2nb(usa, queen=FALSE)
+#   usa_contig
+# 
+# }
+
+# writing the nb object to a file so that I don't have to recreate it every time
+# (it takes forever) & can just read it in directly
+
+#write.nb.gal(usa_contig, 'raw-data/helper/usa_contig_nb.gal')
+usa_contig <- read.gal('raw-data/helper/usa_contig_nb.gal')
+
+# check for symmetric relationships (since if TX is a neighbor of OK, OK should
+# also be a neighbor of TX)
+
+is.symmetric.nb(usa_contig)
+
+# build binary weight matrix
+
+weights.contig.B <- nb2listw(usa_contig, style = "B")
+print(weights.contig.B)
+
+# rescaling each row of B to sum to 1
+
+weights.contig.W <- nb2listw(usa_contig)
+image(listw2mat(weights.contig.W)[,281:1],
+      axes = FALSE)
+
+```
+
+**it's not in kilometers, so figure out what it is**
+
+We can also create custom weights using the inverse distance between the centroids of states. In the below code, I define $W_{ij}$ as the inverse of the distance between $i$ and $j$ in $km$ when $i$ and $j$ are neighbors, and 0 otherwise.
+
+```{r dist_matrix}
+
+# creating distance-based neighbors
+
+usa.dist.range <- dnearneigh(coordinates(usa),
+                            d1 = 0, # specify lower bound of range
+                            d2 = 11 # specify upper bound of range
+                            )
+{
+  # plot(usa, border="grey60", axes=FALSE, main = "Neighbors based on Distance Cutoff")
+  plot(usa.dist.range, coordinates(usa), pch=19, cex=0.6)
+}
+
+# creating weights based on the inverse distance
+
+inv.dist <- lapply(nbdists(usa.dist.range, coordinates(usa)),
+                   function(x) ifelse(x!=0, 1e3/(x), x))
+weights.inv.dist <- nb2listw(usa.dist.range, 
+                             glist = inv.dist, # specify weights
+                             style = "B")
+# note style B uses the weights specified by inv.dist, 
+# setting style = W will renormalize the weights to sum to one
+
+print(weights.inv.dist)
+image(listw2mat(weights.inv.dist)[,281:1],
+      axes = FALSE)
+
+```
+
+## Testing for Spatial Autocorrelation
+
+When testing for spatial autocorrelation in abortion rates globally, we see that the data demonstrates spatial autocorrelation at the $\alpha=0.05$ significance level.
+
+```{r global_moran}
+
+# moran test on row-normalized weights for contiguous neighbors
+
+moran.test(usa$abortion_per_1k_births,
+           listw = weights.contig.W)
+
+# moran test using the inverse weighted distance
+
+moran.test(usa$abortion_per_1k_births,
+           listw = weights.inv.dist)
+
+```
+
+
+
+## Model fitting
+
+CAR & SAR models give parameter for spatial structure & can do a likelihood ratio test to determine whether that parameter is significant or not
+
+```{r abortion_rate_mixef}
+
+# I tried fitting this as Gaussian rather than negative binomial but there was
+# really bad heterskedasticity in the residuals and influential points
+
+library(lme4)
+nbin_df <- arrange(nbin_df, year) %>% mutate(year = as.factor(year))
+summary(mixef <- glmer.nb(abortions ~ offset(log(births)) + intrastate_score +
+                            interstate_score + pct_bachelors + total_population + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + 
+                            (1 | state) + (1 | year), data = nbin_df,
+         control=glmerControl(tolPwrss=1e-3),
+         nAGQ = 0))
+summary(mixef)
+
+# don't look too collinear since vif are both much lower than 10
+
+car::vif(mixef)
+plot(mixef)
+ggplot(nbin_df, aes(longitude, latitude, colour = resid(mixef))) +
+  scale_color_gradient2() +
+  geom_point() +
+  geom_jitter(width = 4,
+              height = 4, 
+              size = 7,
+              alpha = 0.7) +
+  labs(title = 'Examining spatial correlation of residuals in mixed negative binomial model') +
+  theme(panel.background = element_rect(fill = 'black'))
+
+# plotting autocorrelation of residuals
+
+nbin_df[which.min(resid(mixef))[1],]
+
+# checking cooks distances after seeing very large residual for MO in 2019
+{
+  plot(cooks.distance(mixef),
+     type="h", lwd=2,
+     xlab="Observation index",
+     ylab="Cook's distances",
+     main="Cook's distances")
+  abline(h=1,lty=2,col="red")
+}
+
+exp(fixef(mixef))
+hist(nbin_df$abortion_per_1k_births)
+
+# running a Moran test on the (deviance... is that right?) residuals of the
+# above model to determine whether the residuals are more spatially clustered
+# than you would expect by chance alone... they are not
+# https://www.statisticshowto.com/morans-i/
+
+moran.test(residuals(mixef), listw = weights.contig.W, alternative = 'two.sided')
+
+# QQ-plot shows normality of residuals... very large residual likely represents
+# Missouri in 2019, but Cook's distance does not indicate that it's overly
+# influential so we should be fine
+
+qqnorm(residuals(mixef))
+qqline(residuals(mixef))
+
+```
+
+```{r post_pre_ratio}
+
+# I tried fitting this as Gaussian rather than negative binomial but there was
+# really bad heterskedasticity in the residuals and influential points
+
+library(lme4)
+nbin_df <- arrange(nbin_df, year) %>% mutate(year = as.factor(year))
+summary(mixef <- glmer.nb(post13 ~ offset(log(pre13)) + intrastate_score +
+                            interstate_score + pct_bachelors + total_population + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + 
+                            abortion_per_1k_births +(1 | state) + (1 | year), 
+                          data = nbin_df,
+         control=glmerControl(tolPwrss=1e-3),
+         nAGQ = 0))
+summary(mixef)
+
+# don't look too collinear since vif are both much lower than 10
+
+car::vif(mixef)
+plot(mixef)
+ggplot(nbin_df, aes(longitude, latitude, colour = resid(mixef))) +
+  scale_color_gradient2() +
+  geom_point() +
+  geom_jitter(width = 4,
+              height = 4, 
+              size = 7,
+              alpha = 0.7) +
+  labs(title = 'Examining spatial correlation of residuals in mixed negative binomial model') +
+  theme(panel.background = element_rect(fill = 'black'))
+
+# checking cooks distances
+{
+  plot(cooks.distance(mixef),
+     type="h", lwd=2,
+     xlab="Observation index",
+     ylab="Cook's distances",
+     main="Cook's distances")
+  abline(h=1,lty=2,col="red")
+}
+
+exp(fixef(mixef))
+hist(nbin_df$abortion_per_1k_births)
+
+# running a Moran test on the (deviance... is that right?) residuals of the
+# above model to determine whether the residuals are more spatially clustered
+# than you would expect by chance alone... they are not
+# https://www.statisticshowto.com/morans-i/
+
+moran.test(residuals(mixef), listw = weights.contig.W, alternative = 'two.sided')
+
+# QQ-plot shows normality of residuals... very large residual likely represents
+# Missouri in 2019, but Cook's distance does not indicate that it's overly
+# influential so we should be fine
+
+qqnorm(residuals(mixef))
+qqline(residuals(mixef))
+
+```
+
+Enos modeling tips:
+
+- sf (simple features) - google "sf package R" to see if people have updated a lot of this stuff to include spatial autoregressive effects
+https://cran.r-project.org/web/packages/sf/vignettes/sf1.html
+  
+```{r spdep}
+
+# trying spatialreg package to implement maximum likelihood estimation of model
+# parameters in CAR and SAR models in the function spautolm
+
+formula(mixef)
+library(spatialreg)
+sar <- spautolm(abortion_per_1k_births ~ intrastate_score + 
+                      interstate_score + pct_bachelors + prop_nonwhite + 
+                      hh_income + dem_2party + year,
+                    data = nbin_df,
+                    family = 'SAR',
+                    listw = weights.contig.W)
+
+# p-value >0.05 does not suggest evidence of spatial autocorrelation
+
+summary(sar)
+
+# moran test does not provide evidence of additional spatial autocorrelation not
+# captured by the model
+
+moran.test(residuals(sar), listw = weights.contig.W, 
+           alternative = 'two.sided')
+qqnorm(residuals(sar))
+qqline(residuals(sar))
+
+# repeat the same process for CAR
+
+car <- spautolm(abortion_per_1k_births ~ intrastate_score + 
+                      interstate_score + pct_bachelors + prop_nonwhite + 
+                      hh_income + dem_2party + year,
+                    data = nbin_df,
+                    family = 'CAR',
+                    listw = weights.contig.W)
+
+# p-value >0.05 does not suggest evidence of spatial autocorrelation
+
+summary(car)
+
+# moran test does not provide evidence of additional spatial autocorrelation not
+# captured by the model
+
+moran.test(residuals(car), listw = weights.contig.W, 
+           alternative = 'two.sided')
+qqnorm(residuals(car))
+qqline(residuals(car))
+
+```
+
+
+```{r aic_table}
+
+# creating table to compare fit of various models
+
+get_metrics <- function(mod) {
+  if (is.null(summary(mod)$lambda)) {
+    metrics <- c(AIC(mod), logLik(mod), NA, NA)
+  }
+  else {
+    metrics <- c(AIC(mod), logLik(mod), summary(mod)$lambda, summary(mod)$lambda.se)
+  }
+  return(metrics)
+}
+
+methods <- c('nbin_mixef', 'lm_sar', 'lm_car')
+metrics <- c('AIC', 'logLik', 'lambda', 'lambda se')
+tibble(method = rep(methods, each = length(metrics)),
+       metric = rep(metrics, times = length(methods)),
+       value = c(get_metrics(mixef), get_metrics(sar), get_metrics(car))) %>% 
+  pivot_wider(names_from = metric, values_from = value)
+
+```
+

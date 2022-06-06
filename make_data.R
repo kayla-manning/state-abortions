@@ -217,11 +217,12 @@
     {
       abortion_rates <- abortion_long %>% 
         inner_join(births, by = c('state_location' = 'state', 'year')) %>% 
-        group_by(state_location, year, births, total_population) %>% 
+        group_by(state_location, year, count, births, total_population) %>% 
         filter(str_detect(state_residence, 'Total')) %>% 
         summarize(abortion_per_1k_births = count / (births / 1000),
                   abortion_per_100k_pop = count / (total_population / 100000),
                   .groups = 'drop') %>% 
+        rename(abortions = count) %>% 
         filter(!state_location %in% c('Hawaii', 'Alaska', 'District of Columbia'))
     }
     
