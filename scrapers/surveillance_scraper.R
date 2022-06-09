@@ -160,3 +160,27 @@ all_combined <- test %>%
 # writing to csv now
 
 write.csv(all_combined, 'raw-data/scraped/gestational_combined.csv')
+
+library(tabulizer)
+
+path <- '~/Downloads/state_abortions_2014_2016_2017.pdf'
+test <- extract_tables(path)
+
+cleaned_extra <- as.data.frame(do.call(rbind, test)) %>% 
+  slice(10:nrow(.)) %>% 
+  mutate(state = str_squish(str_remove_all(str_remove_all(word(V1, 1, 2), '[0-9]'), ',')),
+         V1 = str_squish(str_remove(V1, state))) %>% 
+  separate(V1, into = c('x2014', 'x2016', 'x2017',
+                        'rt2014', 'rt2016', 'rt2017',
+                        'pct_change'),
+           sep = ' ') %>% 
+  select(state, x2014:x2017) %>% 
+  mutate(across(x2014:x2017, parse_number)) %>% 
+  filter(!(is.na(x2014) & is.na(x2016) & is.na(x2017))) %>% 
+  pivot_longer(x2014:x2017, names_to = 'year', values_to = 'total_reported') %>% 
+  mutate(year = parse_number(year))
+
+cleaned_extra %>% 
+  anti_join(all_combined, by = c('state', 'year')) %>% 
+  bind_rows(all_combined) %>% 
+  arrange(state, year)

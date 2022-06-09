@@ -1,0 +1,203 @@
+
+Copying and pasting code that I wanted to clean out from the `models.Rmd` file but did not want to get rid of in case I revert back to the negative binomial mixed effect approach
+
+
+```{r abortion_rate_mixef}
+
+# I tried fitting this as Gaussian rather than negative binomial but there was
+# really bad heterskedasticity in the residuals and influential points
+
+library(lme4)
+nbin_df <- arrange(nbin_df, year) %>% mutate(year = as.factor(year))
+summary(mixef <- glmer.nb(abortions ~ offset(log(births)) + intrastate_score +
+                            interstate_score + pct_bachelors + total_population + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + 
+                            (1 | state) + (1 | year), data = nbin_df,
+         control=glmerControl(tolPwrss=1e-3),
+         nAGQ = 0))
+summary(mixef)
+
+# don't look too collinear since vif are both much lower than 10
+
+car::vif(mixef)
+plot(mixef)
+ggplot(nbin_df, aes(longitude, latitude, colour = resid(mixef))) +
+  scale_color_gradient2() +
+  geom_point() +
+  geom_jitter(width = 4,
+              height = 4, 
+              size = 7,
+              alpha = 0.7) +
+  labs(title = 'Examining spatial correlation of residuals in mixed negative binomial model') +
+  theme(panel.background = element_rect(fill = 'black'))
+
+# plotting autocorrelation of residuals
+
+nbin_df[which.min(resid(mixef))[1],]
+
+# checking cooks distances after seeing very large residual for MO in 2019
+{
+  plot(cooks.distance(mixef),
+     type="h", lwd=2,
+     xlab="Observation index",
+     ylab="Cook's distances",
+     main="Cook's distances")
+  abline(h=1,lty=2,col="red")
+}
+
+exp(fixef(mixef))
+hist(nbin_df$abortion_per_1k_births)
+
+# running a Moran test on the (deviance... is that right?) residuals of the
+# above model to determine whether the residuals are more spatially clustered
+# than you would expect by chance alone... they are not
+# https://www.statisticshowto.com/morans-i/
+
+moran.test(residuals(mixef), listw = weights.contig.W, alternative = 'two.sided')
+
+# QQ-plot shows normality of residuals... very large residual likely represents
+# Missouri in 2019, but Cook's distance does not indicate that it's overly
+# influential so we should be fine
+
+qqnorm(residuals(mixef))
+qqline(residuals(mixef))
+
+```
+
+```{r post_pre_ratio}
+
+# I tried fitting this as Gaussian rather than negative binomial but there was
+# really bad heterskedasticity in the residuals and influential points
+
+library(lme4)
+nbin_df <- arrange(nbin_df, year) %>% mutate(year = as.factor(year))
+summary(mixef <- glmer.nb(post13 ~ offset(log(pre13)) + intrastate_score +
+                            interstate_score + pct_bachelors + total_population + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + 
+                            abortion_per_1k_births +(1 | state) + (1 | year), 
+                          data = nbin_df,
+         control=glmerControl(tolPwrss=1e-3),
+         nAGQ = 0))
+summary(mixef)
+
+# don't look too collinear since vif are both much lower than 10
+
+car::vif(mixef)
+plot(mixef)
+ggplot(nbin_df, aes(longitude, latitude, colour = resid(mixef))) +
+  scale_color_gradient2() +
+  geom_point() +
+  geom_jitter(width = 4,
+              height = 4, 
+              size = 7,
+              alpha = 0.7) +
+  labs(title = 'Examining spatial correlation of residuals in mixed negative binomial model') +
+  theme(panel.background = element_rect(fill = 'black'))
+
+# checking cooks distances
+{
+  plot(cooks.distance(mixef),
+     type="h", lwd=2,
+     xlab="Observation index",
+     ylab="Cook's distances",
+     main="Cook's distances")
+  abline(h=1,lty=2,col="red")
+}
+
+exp(fixef(mixef))
+hist(nbin_df$abortion_per_1k_births)
+
+# running a Moran test on the (deviance... is that right?) residuals of the
+# above model to determine whether the residuals are more spatially clustered
+# than you would expect by chance alone... they are not
+# https://www.statisticshowto.com/morans-i/
+
+moran.test(residuals(mixef), listw = weights.contig.W, alternative = 'two.sided')
+
+# QQ-plot shows normality of residuals... very large residual likely represents
+# Missouri in 2019, but Cook's distance does not indicate that it's overly
+# influential so we should be fine
+
+qqnorm(residuals(mixef))
+qqline(residuals(mixef))
+
+```
+
+Enos modeling tips:
+
+- sf (simple features) - google "sf package R" to see if people have updated a lot of this stuff to include spatial autoregressive effects
+https://cran.r-project.org/web/packages/sf/vignettes/sf1.html
+  
+```{r spdep}
+
+# trying spatialreg package to implement maximum likelihood estimation of model
+# parameters in CAR and SAR models in the function spautolm
+
+formula(mixef)
+library(spatialreg)
+sar <- spautolm(abortion_per_1k_births ~ intrastate_score + 
+                      interstate_score + pct_bachelors + prop_nonwhite + 
+                      hh_income + dem_2party + year,
+                    data = nbin_df,
+                    family = 'SAR',
+                    listw = weights.contig.W)
+
+# p-value >0.05 does not suggest evidence of spatial autocorrelation
+
+summary(sar)
+
+# moran test does not provide evidence of additional spatial autocorrelation not
+# captured by the model
+
+moran.test(residuals(sar), listw = weights.contig.W, 
+           alternative = 'two.sided')
+qqnorm(residuals(sar))
+qqline(residuals(sar))
+
+# repeat the same process for CAR
+
+car <- spautolm(abortion_per_1k_births ~ intrastate_score + 
+                      interstate_score + pct_bachelors + prop_nonwhite + 
+                      hh_income + dem_2party + year,
+                    data = nbin_df,
+                    family = 'CAR',
+                    listw = weights.contig.W)
+
+# p-value >0.05 does not suggest evidence of spatial autocorrelation
+
+summary(car)
+
+# moran test does not provide evidence of additional spatial autocorrelation not
+# captured by the model
+
+moran.test(residuals(car), listw = weights.contig.W, 
+           alternative = 'two.sided')
+qqnorm(residuals(car))
+qqline(residuals(car))
+
+```
+
+
+```{r aic_table}
+
+# creating table to compare fit of various models
+
+get_metrics <- function(mod) {
+  if (is.null(summary(mod)$lambda)) {
+    metrics <- c(AIC(mod), logLik(mod), NA, NA)
+  }
+  else {
+    metrics <- c(AIC(mod), logLik(mod), summary(mod)$lambda, summary(mod)$lambda.se)
+  }
+  return(metrics)
+}
+
+methods <- c('nbin_mixef', 'lm_sar', 'lm_car')
+metrics <- c('AIC', 'logLik', 'lambda', 'lambda se')
+tibble(method = rep(methods, each = length(metrics)),
+       metric = rep(metrics, times = length(methods)),
+       value = c(get_metrics(mixef), get_metrics(sar), get_metrics(car))) %>% 
+  pivot_wider(names_from = metric, values_from = value)
+
+```
+

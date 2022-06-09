@@ -1,8 +1,22 @@
+---
+title: Model Fitting on Abortion Rates
+output: html_document
+---
 
-https://mgimond.github.io/Spatial/spatial-autocorrelation-in-r.html
-Stat 141 files that Alex emailed to me
+# Questions for Alex:
 
-```{r setup}
+- how do I know that I computed the weights correctly?
+  - try inverse distance squared
+
+- distance-based weights make more sense I think? but that changes the p-values in Moran tests to determine whether or not additional spatial autocorrelation exists in the model that's not picked up... should I compute the models both ways and then select the best one based on AIC? and same goes for the scores vs score categories? (AIC for SAR was better with categories)
+
+- need to study what the p-values mean in model summary vs moran test again
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      message = FALSE)
 
 # packages
 
@@ -11,6 +25,7 @@ Stat 141 files that Alex emailed to me
   library(tidyverse)
   library(raster)
   library(spdep)
+  library(spatialreg)
   select <- dplyr::select
 }
 
@@ -46,19 +61,27 @@ I then convert the list of neighbors into a matrix where entry $W_{ij}$ contains
 ```{r spatial_weights}
 
 # {
-#   {
-#     # getting spatial data for US state boundaries & subsetting out Alaska & Hawaii
-#     # (using tutorial at https://mhallwor.github.io/_pages/basics_SpatialPolygons)
-#     
-#     usa <- raster::getData('GADM', country='USA', level=1)
-#     usa <- usa[!usa$NAME_1 %in% c('Alaska', 'Hawaii'),]
-#     
-#     # merging with data
-#     
-#     usa <- merge(usa, nbin_df, 
-#                  by.x = 'NAME_1', by.y = 'state', 
-#                  duplicateGeoms = TRUE, all.x = FALSE)
-#   }
+  {
+    # getting spatial data for US state boundaries & subsetting out Alaska & Hawaii
+    # (using tutorial at https://mhallwor.github.io/_pages/basics_SpatialPolygons)
+
+    usa <- raster::getData('GADM', country='USA', level=1)
+    usa <- usa[!usa$NAME_1 %in% c('Alaska', 'Hawaii'),]
+
+    # merging with data
+
+    usa <- merge(usa, nbin_df,
+                 by.x = 'NAME_1', by.y = 'state',
+                 duplicateGeoms = TRUE, all.x = FALSE)
+    
+    # ordering within-between categories so that the reference grouping makes sense
+    
+    usa@data$within_between <- fct_relevel(usa@data$within_between,
+                                       'low-low', 'med-low', 'high-low',
+                                       'low-med', 'med-med', 'high-med',
+                                       'low-high', 'med-high', 'high-high')
+    
+  }
 #   
 #   # using poly2nb to create a neighbors list & from that a neighbors matrix
 #   # https://rspatial.org/raster/rosu/Chapter7.html
@@ -122,6 +145,7 @@ inv.dist <- lapply(nbdists(usa.dist.range, coordinates(usa)),
 weights.inv.dist <- nb2listw(usa.dist.range, 
                              glist = inv.dist, # specify weights
                              style = "B")
+
 # note style B uses the weights specified by inv.dist, 
 # setting style = W will renormalize the weights to sum to one
 
@@ -129,7 +153,87 @@ print(weights.inv.dist)
 image(listw2mat(weights.inv.dist)[,281:1],
       axes = FALSE)
 
+# also created weights based on inverse distance squared, which will give a
+# greater penalty to states with larger distances (similar to the construction
+# of the interstate scores)
+
+inv.dist2 <- lapply(nbdists(usa.dist.range, coordinates(usa)),
+                   function(x) ifelse(x!=0, 1e3/(x^2), x))
+weights.inv.dist2 <- nb2listw(usa.dist.range, 
+                              glist = inv.dist2, # specify weights
+                              style = "B")
+
+# note style B uses the weights specified by inv.dist, 
+# setting style = W will renormalize the weights to sum to one
+
+print(weights.inv.dist2)
+image(listw2mat(weights.inv.dist2)[,281:1],
+      axes = FALSE)
+
 ```
+
+```{r mod_function}
+
+weights_matrix <- weights.inv.dist
+
+# writing a function to fit all of the models
+
+rate_lm <- lm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
+                prop_nonwhite + hh_income + dem_2party + as.factor(year),
+            data = usa@data)
+rate_lmw <- lm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
+                prop_nonwhite + hh_income + dem_2party + as.factor(year), 
+               data = usa@data, 
+               weights = births)
+rate_car <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
+                prop_nonwhite + hh_income + dem_2party + as.factor(year),
+               data = usa@data,
+               family = 'CAR',
+               listw = weights_matrix)
+rate_wcar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
+                prop_nonwhite + hh_income + dem_2party + as.factor(year),
+               data = usa@data,
+               weights = births,
+               family = 'CAR',
+               listw = weights_matrix)
+rate_sar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
+                prop_nonwhite + hh_income + dem_2party + as.factor(year),
+               data = usa@data,
+               family = 'SAR',
+               listw = weights_matrix)
+rate_wsar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
+                prop_nonwhite + hh_income + dem_2party + as.factor(year),
+               data = usa@data,
+               weights = births,
+               family = 'SAR',
+               listw = weights_matrix)
+models <- list(rate_lm, rate_lmw, rate_car, rate_wcar, rate_wsar)
+
+morans <- vector('list', length = length(models))
+
+# conducting a Moran test on each of the models, assessing whether (p < 0.05) or
+# not (p >= 0.05) we have evidence of spatial autocorrelation not captured by
+# the model
+
+for (mod in models) {
+  
+  # using built-in function for our lm objects, but it doesn't work on spautolm
+  # objects
+  
+  if (class(mod) == 'lm') {
+    print(lm.morantest(mod, listw = weights_matrix, alternative = 'two.sided'))
+  }
+  
+  # conduct a Moran test of the residuals, where p < 0.05 provides sufficient
+  # evidence of additional autocorrelation not captured by the model
+  
+  else {
+    print(moran.test(residuals(mod), listw = weights_matrix, alternative = 'two.sided'))
+  }
+}
+
+```
+
 
 ## Testing for Spatial Autocorrelation
 
@@ -149,189 +253,188 @@ moran.test(usa$abortion_per_1k_births,
 
 ```
 
-
-
 ## Model fitting
 
-CAR & SAR models give parameter for spatial structure & can do a likelihood ratio test to determine whether that parameter is significant or not
+### OLS
 
-```{r abortion_rate_mixef}
+#### SHOULD I SQRT THE Y-VALUES? even though it loses its easy interpretability & the difference in the distributions is pretty negligible
 
-# I tried fitting this as Gaussian rather than negative binomial but there was
-# really bad heterskedasticity in the residuals and influential points
+```{r}
+hist(usa@data$abortion_per_1k_births, 30)
+hist(sqrt(usa@data$abortion_per_1k_births), 30)
+```
 
-library(lme4)
-nbin_df <- arrange(nbin_df, year) %>% mutate(year = as.factor(year))
-summary(mixef <- glmer.nb(abortions ~ offset(log(births)) + intrastate_score +
-                            interstate_score + pct_bachelors + total_population + 
-                            prop_hisp + prop_nonwhite + hh_income + dem_2party + 
-                            (1 | state) + (1 | year), data = nbin_df,
-         control=glmerControl(tolPwrss=1e-3),
-         nAGQ = 0))
-summary(mixef)
+#### INTERPRET MORAN TEST
 
-# don't look too collinear since vif are both much lower than 10
+Ignoring spatial dependence for the moment, we can fit a standard linear model
 
-car::vif(mixef)
-plot(mixef)
-ggplot(nbin_df, aes(longitude, latitude, colour = resid(mixef))) +
-  scale_color_gradient2() +
+```{r rate_lm}
+
+rate_lm <- lm(abortion_per_1k_births ~ within_between + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year),
+            data = usa@data)
+lm.morantest(rate_lm, listw = weights.inv.dist)
+plot(rate_lm)
+
+```
+
+We can also consider an OLS framework that accounts for heteroskedasticity in the errors by applying weights based on the number of births
+
+```{r rate_wlm}
+
+rate_wlm <- lm(abortion_per_1k_births ~ within_between + pct_bachelors + as.factor(year) +
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party,
+               weights = births,
+               data = usa@data)
+lm.morantest(rate_wlm, listw = weights.inv.dist)
+plot(rate_wlm)
+
+```
+
+We still see evidence of spatial autocorrelation.
+
+I will try to adjust for this with a standard CAR model
+
+```{r rate_car}
+
+# had to drop a few terms so that the system was not computationally singular...
+# dropped total_population
+
+rate_car <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + 
+                       prop_hisp + as.factor(year) +
+                       prop_nonwhite + hh_income + dem_2party,
+               data = usa@data,
+               family = 'CAR',
+               listw = weights.inv.dist)
+
+# the method automatically conducts a likelihood ratio test for the existence of
+# spatial autocorrelation vs. spatial independence, which suggests the existence
+# of spatial autocorrelation in this case (p-value = 2.1335e-07)
+
+summary(rate_car)
+
+# a Moran test of the residuals fails to find evidence of additional spatial
+# autocorrelation not captured by the model (p-value = 0.7103)
+
+moran.test(residuals(rate_car), listw = weights.inv.dist, 
+           alternative = "two.sided")
+
+# little to no deviation from normality in the residual plot
+
+qqnorm(residuals(rate_car))
+qqline(residuals(rate_car))
+
+```
+
+Now I will perform a weighted car, with weights for the number of births occurring in the state
+
+```{r rate_wcar}
+
+# copied CAR model from above but added a weights term
+
+rate_wcar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + 
+                        prop_hisp + as.factor(year) +
+                       prop_nonwhite + hh_income + dem_2party,
+               data = usa@data,
+               weights = births,
+               family = 'CAR',
+               listw = weights.inv.dist)
+
+# checking for evidence of spatial autocorrelation... fails to find evidence of
+# spatial autocorrelation in this case (p-value = 0.679)
+
+summary(rate_wcar)
+
+# confirming with Moran test of residuals... finds sufficient evidence of
+# additional spatial autocorrelation not captured by the model (p-value < 2.2e-16)
+
+moran.test(residuals(rate_wcar), listw = weights.inv.dist, 
+           alternative = "two.sided")
+
+# checking residuals for deviation from normality... nothing too alarming
+
+qqnorm(residuals(rate_wcar))
+qqline(residuals(rate_wcar))
+
+```
+
+Now I will repeat the process with a standard SAR model, followed by a weighted SAR model
+
+```{r rate_sar}
+
+# had to drop a few terms so that the system was not computationally singular...
+# dropped total_population
+
+rate_sar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + 
+                       prop_hisp + as.factor(year) +
+                       prop_nonwhite + hh_income + dem_2party,
+               data = usa@data,
+               family = 'SAR',
+               listw = weights.inv.dist)
+
+# the method automatically conducts a likelihood ratio test for the existence of
+# spatial autocorrelation vs. spatial independence, which suggests the existence
+# of spatial autocorrelation in this case (p-value = 3.989e-11)
+
+summary(rate_sar)
+
+# a Moran test of the residuals fails to find evidence of additional spatial
+# autocorrelation not captured by the model (p = 0.2841)
+
+moran.test(residuals(rate_sar), listw = weights.inv.dist, 
+           alternative = "two.sided")
+
+# little to no deviation from normality in the residual plot
+
+qqnorm(residuals(rate_sar))
+qqline(residuals(rate_sar))
+
+usa@data %>% 
+  group_by(year) %>% 
+  summarise(avg_rate = mean(abortion_per_1k_births)) %>% 
+  ggplot(aes(year, avg_rate)) +
   geom_point() +
-  geom_jitter(width = 4,
-              height = 4, 
-              size = 7,
-              alpha = 0.7) +
-  labs(title = 'Examining spatial correlation of residuals in mixed negative binomial model') +
-  theme(panel.background = element_rect(fill = 'black'))
-
-# plotting autocorrelation of residuals
-
-nbin_df[which.min(resid(mixef))[1],]
-
-# checking cooks distances after seeing very large residual for MO in 2019
-{
-  plot(cooks.distance(mixef),
-     type="h", lwd=2,
-     xlab="Observation index",
-     ylab="Cook's distances",
-     main="Cook's distances")
-  abline(h=1,lty=2,col="red")
-}
-
-exp(fixef(mixef))
-hist(nbin_df$abortion_per_1k_births)
-
-# running a Moran test on the (deviance... is that right?) residuals of the
-# above model to determine whether the residuals are more spatially clustered
-# than you would expect by chance alone... they are not
-# https://www.statisticshowto.com/morans-i/
-
-moran.test(residuals(mixef), listw = weights.contig.W, alternative = 'two.sided')
-
-# QQ-plot shows normality of residuals... very large residual likely represents
-# Missouri in 2019, but Cook's distance does not indicate that it's overly
-# influential so we should be fine
-
-qqnorm(residuals(mixef))
-qqline(residuals(mixef))
+  geom_smooth()
 
 ```
 
-```{r post_pre_ratio}
+Repeating the process for the weighted SAR
 
-# I tried fitting this as Gaussian rather than negative binomial but there was
-# really bad heterskedasticity in the residuals and influential points
+```{r rate_wsar}
 
-library(lme4)
-nbin_df <- arrange(nbin_df, year) %>% mutate(year = as.factor(year))
-summary(mixef <- glmer.nb(post13 ~ offset(log(pre13)) + intrastate_score +
-                            interstate_score + pct_bachelors + total_population + 
-                            prop_hisp + prop_nonwhite + hh_income + dem_2party + 
-                            abortion_per_1k_births +(1 | state) + (1 | year), 
-                          data = nbin_df,
-         control=glmerControl(tolPwrss=1e-3),
-         nAGQ = 0))
-summary(mixef)
+# had to drop a few terms so that the system was not computationally singular...
+# dropped total_population
 
-# don't look too collinear since vif are both much lower than 10
+rate_wsar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + 
+                        prop_hisp + as.factor(year) +
+                       prop_nonwhite + hh_income + dem_2party,
+               data = usa@data,
+               weights = births,
+               family = 'SAR',
+               listw = weights.inv.dist)
 
-car::vif(mixef)
-plot(mixef)
-ggplot(nbin_df, aes(longitude, latitude, colour = resid(mixef))) +
-  scale_color_gradient2() +
-  geom_point() +
-  geom_jitter(width = 4,
-              height = 4, 
-              size = 7,
-              alpha = 0.7) +
-  labs(title = 'Examining spatial correlation of residuals in mixed negative binomial model') +
-  theme(panel.background = element_rect(fill = 'black'))
+# the method automatically conducts a likelihood ratio test for the existence of
+# spatial autocorrelation vs. spatial independence, which suggests the existence
+# of spatial autocorrelation in this case (p-value = 3.969e-13)
 
-# checking cooks distances
-{
-  plot(cooks.distance(mixef),
-     type="h", lwd=2,
-     xlab="Observation index",
-     ylab="Cook's distances",
-     main="Cook's distances")
-  abline(h=1,lty=2,col="red")
-}
+summary(rate_wsar)
 
-exp(fixef(mixef))
-hist(nbin_df$abortion_per_1k_births)
+# a Moran test of the residuals fails to find evidence of additional spatial
+# autocorrelation not captured by the model (p = 0.111)
 
-# running a Moran test on the (deviance... is that right?) residuals of the
-# above model to determine whether the residuals are more spatially clustered
-# than you would expect by chance alone... they are not
-# https://www.statisticshowto.com/morans-i/
+moran.test(residuals(rate_wsar), listw = weights.inv.dist, 
+           alternative = "two.sided")
 
-moran.test(residuals(mixef), listw = weights.contig.W, alternative = 'two.sided')
+# little to no deviation from normality in the residual plot
 
-# QQ-plot shows normality of residuals... very large residual likely represents
-# Missouri in 2019, but Cook's distance does not indicate that it's overly
-# influential so we should be fine
-
-qqnorm(residuals(mixef))
-qqline(residuals(mixef))
+qqnorm(residuals(rate_wsar))
+qqline(residuals(rate_wsar))
 
 ```
 
-Enos modeling tips:
+## Model Comparisons
 
-- sf (simple features) - google "sf package R" to see if people have updated a lot of this stuff to include spatial autoregressive effects
-https://cran.r-project.org/web/packages/sf/vignettes/sf1.html
-  
-```{r spdep}
-
-# trying spatialreg package to implement maximum likelihood estimation of model
-# parameters in CAR and SAR models in the function spautolm
-
-formula(mixef)
-library(spatialreg)
-sar <- spautolm(abortion_per_1k_births ~ intrastate_score + 
-                      interstate_score + pct_bachelors + prop_nonwhite + 
-                      hh_income + dem_2party + year,
-                    data = nbin_df,
-                    family = 'SAR',
-                    listw = weights.contig.W)
-
-# p-value >0.05 does not suggest evidence of spatial autocorrelation
-
-summary(sar)
-
-# moran test does not provide evidence of additional spatial autocorrelation not
-# captured by the model
-
-moran.test(residuals(sar), listw = weights.contig.W, 
-           alternative = 'two.sided')
-qqnorm(residuals(sar))
-qqline(residuals(sar))
-
-# repeat the same process for CAR
-
-car <- spautolm(abortion_per_1k_births ~ intrastate_score + 
-                      interstate_score + pct_bachelors + prop_nonwhite + 
-                      hh_income + dem_2party + year,
-                    data = nbin_df,
-                    family = 'CAR',
-                    listw = weights.contig.W)
-
-# p-value >0.05 does not suggest evidence of spatial autocorrelation
-
-summary(car)
-
-# moran test does not provide evidence of additional spatial autocorrelation not
-# captured by the model
-
-moran.test(residuals(car), listw = weights.contig.W, 
-           alternative = 'two.sided')
-qqnorm(residuals(car))
-qqline(residuals(car))
-
-```
-
-
-```{r aic_table}
+```{r comparisons}
 
 # creating table to compare fit of various models
 
@@ -345,12 +448,118 @@ get_metrics <- function(mod) {
   return(metrics)
 }
 
-methods <- c('nbin_mixef', 'lm_sar', 'lm_car')
+methods <- c('lm', 'wlm', 'car', 'wcar', 'sar', 'wsar')
 metrics <- c('AIC', 'logLik', 'lambda', 'lambda se')
 tibble(method = rep(methods, each = length(metrics)),
        metric = rep(metrics, times = length(methods)),
-       value = c(get_metrics(mixef), get_metrics(sar), get_metrics(car))) %>% 
+       value = c(get_metrics(rate_lm), get_metrics(rate_wlm), 
+                 get_metrics(rate_car), get_metrics(rate_wcar),
+                 get_metrics(rate_sar), get_metrics(rate_wsar))) %>% 
   pivot_wider(names_from = metric, values_from = value)
 
 ```
+
+Each of the models is worsened by the use of weights based on the number of births (increased AIC and lower log-likelihood). This suggests that we should prefer the standard OLS, CAR, and SAR models over their weighted counterparts.
+
+The unweighted models have relatively comparable AIC scores, with the SAR model performing best with the lowest AIC score, followed by the CAR model and the OLS model. Ranking the models in terms of highest log-likelihood yields the same order.
+
+Collectively, these results suggest a standard SAR framework captures the earlier observed spatial autocorrelation in abortion rates.
+
+## Inference on SAR Model
+
+### DOES ACCOUNTING FOR SPATIAL AUTOCORRELATION INTRODUCE COLLINEARITY WITH MY INTERSTATE POLICY SCORES? I need to graph the confidence intervals for each of the within-between coefficients
+(or I should think of other ways to visualize the within-between coefficients that also display which ones are significant)
+
+```{r sar_inference}
+
+# insignificant effects of the interstate scores, but significant effects of covariates
+
+summary(rate_sar)
+data.frame(coef(rate_sar)) %>% 
+  rownames_to_column('term') %>% 
+  filter(str_detect(term, 'within_between')) %>% 
+  arrange(coef.rate_sar.)
+
+# this differs from the OLS model that did not account for spatial effects...
+# this found *significant* NEGATIVE effects of interstate scores on abortion
+# rates. that is, having stricter surroundings is associated with a decrease in
+# abortion rates, even when controlling for within-state scores
+
+
+```
+
+# Other dependent variables
+
+```{r ie_sar}
+
+ie_sar <- spautolm(log(ie_ratio) ~ within_between + pct_bachelors + 
+                       prop_hisp + 
+                       prop_nonwhite + hh_income + dem_2party,
+               data = usa@data,
+               family = 'SAR',
+               listw = weights.inv.dist)
+
+# both p-values < 0.05... figure out what that means again
+
+summary(ie_sar)
+moran.test(residuals(ie_sar), listw = weights.inv.dist)
+
+# getting coefficients ready to interpret... higher IE ratio indicates that more
+# people travel in the state and few people leave the state.... lower ratios
+# indicate that more people leave the state and fewer people come into the state
+# for abortions... having the largest decrease in the IE ratio would then
+# indicate that it corresponds to more people seeking abortions in neighboring
+# states relative to the state in question
+
+data.frame(coef(ie_sar)) %>% 
+  rownames_to_column('term') %>% 
+  filter(str_detect(term, 'within_between')) %>% 
+  mutate(coef.ie_sar. = exp(coef.ie_sar.)) %>% 
+  arrange(coef.ie_sar.) %>% 
+  rename(exp_coef = coef.ie_sar.)
+
+```
+log(nonres_res_ratio-1) works, but square-root is the only transformation that works for late_to_early ratio & that's not really interpretable
+
+```{r nonres_res_sar}
+
+# transforming the variable so that it's approximately normally distributed
+
+hist(usa@data$nonres_res_ratio)
+hist(log(usa@data$nonres_res_ratio - 1))
+
+# fitting the model on this transformed variable
+
+nonres_res_sar <- spautolm(log(nonres_res_ratio-1) ~ within_between + pct_bachelors + 
+                       prop_hisp + 
+                       prop_nonwhite + hh_income + dem_2party,
+               data = usa@data,
+               family = 'SAR',
+               listw = weights.inv.dist)
+
+summary(nonres_res_sar)
+moran.test(residuals(nonres_res_sar), listw = weights.inv.dist)
+
+# un-transforming the coefficients... larger nonres-res ratios indicates that a
+# relatively greater share of abortions in that state come from nonresidents
+# compared to residents, relative to other states... larger ratios mean
+# comparatively more people travel to the state for abortions and/or residents
+# leave the state for abortions
+
+data.frame(coef(ie_sar)) %>% 
+  rownames_to_column('term') %>% 
+  filter(str_detect(term, 'within_between')) %>% 
+  mutate(coef.ie_sar. = exp(coef.ie_sar.)+1) %>% 
+  arrange(coef.ie_sar.) %>% 
+  rename(exp_coef = coef.ie_sar.)
+
+# try fitting this on the raw data & see what happens with the residuals
+# (qqplot)... if residuals still look good, we can stick with using the original
+# data, but if not we can use the square root
+
+hist(usa@data$late_to_early)
+hist(sqrt(usa@data$late_to_early))
+
+```
+
 
