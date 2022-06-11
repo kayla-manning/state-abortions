@@ -37,6 +37,7 @@ This directory contains files that aren't being directly used but contain some c
 - Abortion surveillance report with gestational data (2019): https://www.cdc.gov/mmwr/volumes/70/ss/ss7009a1.htm
 - Abortions by occurrence and residence: https://www.cdc.gov/reproductivehealth/data_stats/abortion.htm
 - Births: https://wonder.cdc.gov/natality-current.html
+- Additional state abortion counts: https://www.guttmacher.org/sites/default/files/report_pdf/abortion-incidence-service-availability-us-2017.pdf
 
 ### Control variables
 - Presidential vote share: https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/42MVDX

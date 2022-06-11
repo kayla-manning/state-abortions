@@ -27,6 +27,7 @@ knitr::opts_chunk$set(echo = TRUE,
   library(spdep)
   library(spatialreg)
   select <- dplyr::select
+  library(ggpubr)
 }
 
 # data
@@ -52,9 +53,11 @@ nbin_df <- combined %>%
 
 States serve as the geographic units of this analysis, so I must import the pre-computed neighborhood object from GADM, which contains location information for each of the 50 states. Because this analysis is focusing on the contiguous United States, I drop Hawaii and Alaska from the observations. Then, I merge the location data with my dataframe containing the abortion data. 
 
-I create a neighbors list using `poly2nb()` from the `spdep` package, and I build a binary weight matrix from that. Creating the neighbors in this manner will classify two states as neighbors if they share a boundary. If I wish to change this in the future, I can classify two states as neighbors if their centroids lie within a specified distance using `dnearneigh()` instead of `poly2nb()`. Alternatively, I could instead use `knn2nb()` to compute $k$ neighborhood assignments based on the number of nearest neighbors.
+I create a neighbors list using `poly2nb()` from the `spdep` package, and I build a binary weight matrix from that. Creating the neighbors in this manner will classify two states as neighbors if they share a boundary. This approach operates under the assumption that states sharing borders are most likely to share spatial characteristics not captured by the predictors included in the model. In the case of abortion spillover, it makes sense that women will cross as few state lines as possible to obtain an abortion.
 
-For now, this analysis will adopt the `poly2nb()` approach that focuses on shared boundaries. This approach operates under the assumption that states sharing borders are most likely to share spatial characteristics not captured by the predictors included in the model. In the case of abortion spillover, it makes sense that women will cross as few state lines as possible to obtain an abortion. One could also make the case for distance-based neighborhood classifications using `dnearneigh()`, since tight clusters of states in regions such as New England likely share many regional characteristics even if they are not direct neighbors. However, this approach creates the need to select some distance cutoff, and selecting this metric such that it will capture direct neighbors in regions with large states with distant centroids and indirect neighbors in regions with small states relies on some rather arbitrary decisions.
+For now, this analysis will adopt an approach that computes weights based on the inverse distance between states. This decision follows from a model fitting process on the three different weighting schemes. When compared to contiguity weights and inverse distance squared weights, the inverse distance weights minimized AIC in three of the four spatial models.
+
+One could also make the case for distance-based neighborhood classifications using `dnearneigh()`, since tight clusters of states in regions such as New England likely share many regional characteristics even if they are not direct neighbors. 
 
 I then convert the list of neighbors into a matrix where entry $W_{ij}$ contains the weight of the connection from state $i$ **to** state $j$. We build our weights matrix with binary weights such that $W_{ij}=1$ if $j$ is a neighbor of $i$ is zero otherwise. Then, I normalized the rows of the matrix such that each row of $B$ will sum to $1$ and $W_{ij} = \frac{B_{ij}}{\sum_{j} B_{ij}}.$
 
@@ -174,66 +177,149 @@ image(listw2mat(weights.inv.dist2)[,281:1],
 
 ```{r mod_function}
 
+methods <- c('lm', 'wlm', 'car', 'wcar', 'sar', 'wsar')
 weights_matrix <- weights.inv.dist
 
 # writing a function to fit all of the models
 
-rate_lm <- lm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                prop_nonwhite + hh_income + dem_2party + as.factor(year),
-            data = usa@data)
-rate_lmw <- lm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                prop_nonwhite + hh_income + dem_2party + as.factor(year), 
-               data = usa@data, 
-               weights = births)
-rate_car <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                prop_nonwhite + hh_income + dem_2party + as.factor(year),
-               data = usa@data,
-               family = 'CAR',
-               listw = weights_matrix)
-rate_wcar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                prop_nonwhite + hh_income + dem_2party + as.factor(year),
-               data = usa@data,
-               weights = births,
-               family = 'CAR',
-               listw = weights_matrix)
-rate_sar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                prop_nonwhite + hh_income + dem_2party + as.factor(year),
-               data = usa@data,
-               family = 'SAR',
-               listw = weights_matrix)
-rate_wsar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                prop_nonwhite + hh_income + dem_2party + as.factor(year),
-               data = usa@data,
-               weights = births,
-               family = 'SAR',
-               listw = weights_matrix)
-models <- list(rate_lm, rate_lmw, rate_car, rate_wcar, rate_wsar)
-
-morans <- vector('list', length = length(models))
-
-# conducting a Moran test on each of the models, assessing whether (p < 0.05) or
-# not (p >= 0.05) we have evidence of spatial autocorrelation not captured by
-# the model
-
-for (mod in models) {
+make_models <- function(weights_matrix) {
   
-  # using built-in function for our lm objects, but it doesn't work on spautolm
-  # objects
+  # creating each model object
+
+  rate_lm <- lm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
+                  prop_nonwhite + hh_income + dem_2party + as.factor(year),
+              data = usa@data)
+  rate_lmw <- lm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
+                  prop_nonwhite + hh_income + dem_2party + as.factor(year), 
+                 data = usa@data, 
+                 weights = births)
+  rate_car <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
+                  prop_nonwhite + hh_income + dem_2party + as.factor(year),
+                 data = usa@data,
+                 family = 'CAR',
+                 listw = weights_matrix)
+  rate_wcar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
+                  prop_nonwhite + hh_income + dem_2party + as.factor(year),
+                 data = usa@data,
+                 weights = births,
+                 family = 'CAR',
+                 listw = weights_matrix)
+  rate_sar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
+                  prop_nonwhite + hh_income + dem_2party + as.factor(year),
+                 data = usa@data,
+                 family = 'SAR',
+                 listw = weights_matrix)
+  rate_wsar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
+                  prop_nonwhite + hh_income + dem_2party + as.factor(year),
+                 data = usa@data,
+                 weights = births,
+                 family = 'SAR',
+                 listw = weights_matrix)
+  models <- list(rate_lm, rate_lmw, rate_car, rate_wcar, rate_sar, rate_wsar)
   
-  if (class(mod) == 'lm') {
-    print(lm.morantest(mod, listw = weights_matrix, alternative = 'two.sided'))
+  
+  
+  morans <- vector('list', length = length(models))
+  plots <- vector('list', length = length(models))
+  
+  for (i in 1:length(models)) {
+    
+    ################
+    #### MORAN
+    ################
+    
+    {
+      # conducting a Moran test on each of the models, assessing whether (p < 0.05) or
+      # not (p >= 0.05) we have evidence of spatial autocorrelation not captured by
+      # the model...
+      # using built-in function for our lm objects, but it doesn't work on spautolm
+      # objects
+      
+      if (class(mod) == 'lm') {
+        morans[[i]] <- lm.morantest(models[[i]], listw = weights_matrix, alternative = 'two.sided')
+      }
+      
+      # conduct a Moran test of the residuals, where p < 0.05 provides sufficient
+      # evidence of additional autocorrelation not captured by the model
+      
+      else {
+        morans[[i]] <- moran.test(residuals(models[[i]]), listw = weights_matrix, alternative = 'two.sided')
+      }
+    }
+    
+    ################
+    #### PLOTS
+    ################
+    
+    {
+      # generating diagnostic plots for each model
+  
+      resid_vs_fit <- tibble(fit = fitted(models[[i]]), 
+             resid = residuals(models[[i]])) %>% 
+        ggplot(aes(fit, resid)) +
+        geom_point() +
+        geom_hline(yintercept = 0,
+                   color = 'red',
+                   linetype = 'dashed') +
+        theme_minimal() +
+        labs(title = 'Residuals vs. fitted values',
+             x = 'Fitted values',
+             y = 'Residuals')
+      plot_data <- tibble(fit = fitted(models[[i]]), 
+                          resid = residuals(models[[i]])) 
+      qqplot <- plot_data %>% 
+        ggplot(aes(sample = resid)) +
+        stat_qq() +
+        stat_qq_line(col = 'red') +
+        theme_minimal() +
+        labs(title = 'QQ-plot for normality of residuals',
+             x = 'Theoretical quantiles',
+             y = 'Sample quantiles')
+      
+      plots[[i]] <- annotate_figure(ggarrange(resid_vs_fit, qqplot),
+                                    top = text_grob(paste('Diagnosic plots for', methods[[i]]),size = 14))
+    }
   }
   
-  # conduct a Moran test of the residuals, where p < 0.05 provides sufficient
-  # evidence of additional autocorrelation not captured by the model
+  # I want to return the methods, models, moran tests, and diagnostic plots
   
-  else {
-    print(moran.test(residuals(mod), listw = weights_matrix, alternative = 'two.sided'))
-  }
+  return_values <- list(methods, models, morans, plots)
+  return(return_values)
+
 }
 
-```
+# generating the models and diagnostics for the two different weights matrices
 
+rates_inv_dist <- make_models(weights.inv.dist)
+rates_inv_dist2 <- make_models(weights.inv.dist2)
+rates_contig <- make_models(weights.contig.W)
+
+metrics <- c('AIC', 'logLik', 'lambda', 'lambda se')
+
+get_metrics_table <- function(model_list) {
+  tibble(method = rep(methods, each = length(metrics)),
+       metric = rep(metrics, times = length(methods)),
+       value = unlist(lapply(model_list[[2]], get_metrics))) %>% 
+    pivot_wider(names_from = metric, values_from = value)
+}
+
+get_metrics_table(rates_inv_dist) %>% 
+  mutate(weights = 'inv_dist') %>% 
+  bind_rows(get_metrics_table(rates_inv_dist2) %>% 
+              mutate(weights = 'inv_dist2')) %>% 
+  bind_rows(get_metrics_table(rates_contig) %>% 
+              mutate(weights = 'contig')) %>% 
+  select(method, AIC, weights) %>% 
+  pivot_wider(names_from = weights,
+              values_from = AIC,
+              names_prefix = 'AIC_') %>% 
+  mutate(best_weights = case_when(AIC_inv_dist < AIC_inv_dist2 & AIC_inv_dist < AIC_contig ~ 'dist',
+                                  AIC_inv_dist > AIC_inv_dist2 & AIC_inv_dist2 < AIC_contig ~ 'dist2',
+                                  AIC_contig < AIC_inv_dist2 & AIC_inv_dist > AIC_contig ~ 'contig',
+                                  TRUE ~ ''),
+         best_weights = ifelse(best_weights == '', NA, best_weights))
+
+```
 
 ## Testing for Spatial Autocorrelation
 

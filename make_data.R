@@ -36,13 +36,14 @@
     library(transformr)
   }
   
-  # data <3
+  # reading in the data <3
   
   {
     # reading in gestational data that I scraped
     
     gestation <- read_csv('raw-data/scraped/gestational_combined.csv') %>% 
-      select(-X1) %>% distinct() %>% 
+      # select(-X1) %>% 
+      distinct() %>% 
       mutate(state = ifelse(state == 'New York State', 'New York', state))
     
     # looping through the different excel sheets to get the abortion count data
@@ -76,6 +77,26 @@
     
     income <- read_excel('raw-data/downloads/household_income.xlsx', skip = 7) %>% 
       clean_names()
+    
+    # state Guttmacher estimates (obtained through their Abortion Provider
+    # Census) that isn't available through the CDC
+    
+    path <- 'raw-data/downloads/state_abortions_2014_2016_2017.pdf'
+    test <- extract_tables(path)
+    
+    extra_abortions <- as.data.frame(do.call(rbind, test)) %>% 
+      slice(10:nrow(.)) %>% 
+      mutate(state = str_squish(str_remove_all(str_remove_all(word(V1, 1, 2), '[0-9]'), ',')),
+             V1 = str_squish(str_remove(V1, state))) %>% 
+      separate(V1, into = c('x2014', 'x2016', 'x2017',
+                            'rt2014', 'rt2016', 'rt2017',
+                            'pct_change'),
+               sep = ' ') %>% 
+      select(state, x2014:x2017) %>% 
+      mutate(across(x2014:x2017, parse_number)) %>% 
+      filter(!(is.na(x2014) & is.na(x2016) & is.na(x2017))) %>% 
+      pivot_longer(x2014:x2017, names_to = 'year', values_to = 'total_reported') %>% 
+      mutate(year = parse_number(year))
   }
   
   # cleaning the presidential data
@@ -126,6 +147,16 @@
            count = as.integer(count)) %>% 
     mutate(across(c(state_location, state_residence), 
                   function(x) str_replace(x, ' Of ', ' of ')))
+  
+  # adding in the extra data from Guttmacher APC that isn't available in Guttmacher
+  
+  extra_abortions %>% 
+    anti_join(abortion_long, by = c('state' = 'state_location', 'year')) %>% 
+    rename(state_location = state,
+           count = total_reported) %>% 
+    mutate(state_residence = 'Total by Residence') %>% 
+    bind_rows(abortion_long)
+  
 }
 
 ###############################
