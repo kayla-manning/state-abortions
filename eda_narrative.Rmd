@@ -49,7 +49,8 @@ knitr::opts_chunk$set(message = FALSE,
   # reading in gestational data that I scraped (with granular windows)
 
   gestation <- read_csv('raw-data/scraped/gestational_combined.csv') %>% 
-    select(-X1) %>% distinct() %>% 
+    # select(-X1) %>% 
+    distinct() %>% 
     mutate(state = ifelse(state == 'New York State', 'New York', state))
   
   # reading in the raw policy data
@@ -142,18 +143,40 @@ for (i in 1:length(missing_states)) {
   missing_state_yr_table <- rbind(missing_state_yr_table, this_state)
 }
 
+# getting states that didn't report to the CDC for which I obtained data from
+# the Guttmacher APC
+
+apc_extra_data <- abortion_long %>% 
+  distinct(state_location, year) %>% 
+  count(state_location) %>% 
+  filter(n < 10,
+         !str_detect(state_location, fixed('*')),
+         !str_detect(state_location, 'District of')) %>% 
+  inner_join(abortion_long) %>% 
+  filter(str_detect(state_residence, 'Total')) %>% 
+  drop_na(count) %>% 
+  select(-n)
+
 # formatting the table
 
 missing_state_yr_table %>% 
-  rename(state = V1, year = V2) %>% 
-  dcast(state ~ year) %>% 
-  mutate(across(2:ncol(.), function(x) ifelse(is.na(x), '', 'X'))) %>% 
+  rename(state = V1, year = V2)  %>% 
   mutate(state = str_replace(str_to_title(str_replace_all(state, '_', ' ')),
-                             ' Of ', ' of ')) %>% 
+                             ' Of ', ' of '),
+         year = as.numeric(year)) %>%
+  anti_join(apc_extra_data, by = c('state' = 'state_location', 'year')) %>% 
+  dcast(state ~ year) %>% 
+  mutate(across(2:ncol(.), function(x) ifelse(is.na(x), '', 'X')),
+         `2014*` = '', 
+         `2017*` = '') %>% 
   filter(state != 'District of Columbia') %>% 
-  rename(State = state) %>% 
-  kable(caption = 'States that do not report their abortion counts to CDC',
-        booktabs = TRUE)
+  rename(State = state,
+         `2016*` = `2016`) %>% 
+  select(State:`2013`, `2014*`, `2015`:`2016*`, `2017*`, `2018`:`2019`) %>% 
+  kable(caption = 'State-year observations missing abortion count data',
+        booktabs = TRUE) %>% 
+  add_footnote("* indicates state data was obtained from the Guttmacher Institute's Abortion Provider Census \nin lieu of CDC data",
+               notation = 'none')
 
 ```
 
@@ -230,7 +253,8 @@ data_by_missingness <- combined %>%
 missing_balance_check <-  data_by_missingness %>% 
   group_by(nonreport) %>% 
   summarise_all(function(x) mean(x, na.rm = TRUE)) %>% 
-  pivot_longer(2:ncol(.), names_to = 'statistic', values_to = 'average')
+  pivot_longer(2:ncol(.), names_to = 'statistic', values_to = 'average') %>% 
+  filter(statistic != '...1') 
 
 # getting list of states in each category
 
@@ -517,7 +541,8 @@ combined %>%
   geom_point() +
   labs(title = 'States that import more abortions also tend to export more abortions',
        subtitle = 
-         paste('Correlation of', round(cor(combined$imports, combined$exports), 3))) +
+         paste('Correlation of', round(cor(combined$imports, combined$exports,
+                                           use = 'complete.obs'), 3))) +
   theme_minimal() +
   geom_smooth(method = 'lm')
 
@@ -623,12 +648,15 @@ combined %>%
 combined %>% 
   select(ie_ratio, late_to_early, abortion_per_1k_births, 
          abortion_per_100k_pop, nonres_res_ratio) %>% 
-  cor() %>% 
+  cor(use = 'complete.obs') %>% 
   kable(booktabs = TRUE,
         caption = 'Bivariate correlations between dependent variables')
 combined %>% 
   select(ie_ratio, late_to_early, abortion_per_1k_births, 
          abortion_per_100k_pop, nonres_res_ratio) %>% 
+  filter_at(vars(ie_ratio, late_to_early, abortion_per_1k_births, 
+         abortion_per_100k_pop, nonres_res_ratio), 
+         all_vars(!is.na(.))) %>% 
   cor() %>% 
   ggcorrplot::ggcorrplot(hc.order = TRUE, type = "lower",
    lab = TRUE)

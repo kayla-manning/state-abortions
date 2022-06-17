@@ -150,11 +150,11 @@
   
   # adding in the extra data from Guttmacher APC that isn't available in Guttmacher
   
-  extra_abortions %>% 
+  abortion_long <- extra_abortions %>% 
     anti_join(abortion_long, by = c('state' = 'state_location', 'year')) %>% 
     rename(state_location = state,
            count = total_reported) %>% 
-    mutate(state_residence = 'Total by Residence') %>% 
+    mutate(state_residence = 'Total By Location of Service') %>% 
     bind_rows(abortion_long)
   
 }
