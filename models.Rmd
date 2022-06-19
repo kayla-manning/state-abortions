@@ -5,9 +5,6 @@ output: html_document
 
 # Questions for Alex:
 
-- how do I know that I computed the weights correctly?
-  - try inverse distance squared
-
 - need to study what the p-values mean in model summary vs moran test again
 
 ```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
@@ -26,6 +23,8 @@ knitr::opts_chunk$set(echo = TRUE,
   library(spatialreg)
   select <- dplyr::select
   library(ggpubr)
+  library(knitr)
+  library(kableExtra)
 }
 
 # data
@@ -48,16 +47,6 @@ nbin_df <- combined %>%
 ```
 
 ## Neighbors and Weights
-
-States serve as the geographic units of this analysis, so I must import the pre-computed neighborhood object from GADM, which contains location information for each of the 50 states. Because this analysis is focusing on the contiguous United States, I drop Hawaii and Alaska from the observations. Then, I merge the location data with my dataframe containing the abortion data. 
-
-I create a neighbors list using `poly2nb()` from the `spdep` package, and I build a binary weight matrix from that. Creating the neighbors in this manner will classify two states as neighbors if they share a boundary. This approach operates under the assumption that states sharing borders are most likely to share spatial characteristics not captured by the predictors included in the model. In the case of abortion spillover, it makes sense that women will cross as few state lines as possible to obtain an abortion.
-
-For now, this analysis will adopt an approach that computes weights based on the inverse distance between states. This decision follows from a model fitting process on the three different weighting schemes. When compared to contiguity weights and inverse distance squared weights, the inverse distance weights minimized AIC in three of the four spatial models.
-
-One could also make the case for distance-based neighborhood classifications using `dnearneigh()`, since tight clusters of states in regions such as New England likely share many regional characteristics even if they are not direct neighbors. 
-
-I then convert the list of neighbors into a matrix where entry $W_{ij}$ contains the weight of the connection from state $i$ **to** state $j$. We build our weights matrix with binary weights such that $W_{ij}=1$ if $j$ is a neighbor of $i$ is zero otherwise. Then, I normalized the rows of the matrix such that each row of $B$ will sum to $1$ and $W_{ij} = \frac{B_{ij}}{\sum_{j} B_{ij}}.$
 
 ```{r spatial_weights}
 
@@ -121,8 +110,6 @@ image(listw2mat(weights.contig.W)[,281:1],
 
 ```
 
-We can also create custom weights using the inverse distance between the centroids of states. Because one can easily travel across multiple state lines in regions with many small state, it makes more sense in the context of this problem to use weights computed by the inverse distance between the two states. This aligns well with the population-weighted, distance-decayed weights applied to the interstate policy scores. In the spirit of the scoring mechanism, I constructed spatial weights based on the distance and the distance squared with the intent of testing which one better captures the trends present in the data. In the below code, I define $W_{ij}$ as the inverse of the distance -- or distance squared when appropriate -- between $i$ and $j$ in $km$ when $i$ and $j$ are neighbors, and 0 otherwise.
-
 ```{r dist_matrix}
 
 # creating weights based on the inverse distance
@@ -160,8 +147,6 @@ image(listw2mat(weights.inv.dist2)[,281:1],
 ```
 
 ## Testing for Spatial Autocorrelation
-
-When testing for spatial autocorrelation in abortion rates globally, we see that the data demonstrates spatial autocorrelation at the $\alpha=0.05$ significance level for all three spatial weighting schemes.
 
 ** need to figure out what this actually means for the data **
 
@@ -302,31 +287,91 @@ rates_inv_dist <- make_models(weights.inv.dist)
 rates_inv_dist2 <- make_models(weights.inv.dist2)
 rates_contig <- make_models(weights.contig.W)
 
+get_metrics_table(rates_inv_dist)
+
+rates_inv_dist[[2]][3]
+
 ```
 
 ### OLS
 
 #### SHOULD I SQRT THE Y-VALUES? even though it loses its easy interpretability & the difference in the distributions is pretty negligible
 
-```{r rate_distributions}
-hist(usa@data$abortion_per_1k_births, 30)
-hist(sqrt(usa@data$abortion_per_1k_births), 30)
+```{r distributions}
 
+#I want to plot all of the dependent variables & their respective
+#transformations to Gaussian
+
+{
+  # this requires some data manipulation, which I'm doing below
+  
+  untransformed <- usa@data %>% 
+    select(abortion_per_1k_births,
+           ie_ratio,
+           nonres_res_ratio,
+           late_to_early) %>% 
+    pivot_longer(everything()) %>% 
+    mutate(transformed = FALSE,
+           transformation = case_when(name == 'abortion_per_1k_births' ~ 'log(x)',
+                                      name == 'ie_ratio' ~ 'log(x)',
+                                      name == 'nonres_res_ratio' ~ 'log(x - 1)',
+                                      name == 'late_to_early' ~ 'none')) 
+  
+  graph_df <- untransformed %>% 
+    mutate(value = case_when(name == 'abortion_per_1k_births' ~ log(value),
+                                      name == 'ie_ratio' ~ log(value),
+                                      name == 'nonres_res_ratio' ~ log(value-1),
+                                      name == 'late_to_early' ~ value),
+           transformed = TRUE) %>% 
+    bind_rows(untransformed) %>% 
+    mutate(transformation = ifelse(transformed, transformation, 'untransformed')) 
+  
+  # creating a list of plots in a loop to streamline the code
+  
+  plots <- list()
+  dep_vars <- c('abortion_per_1k_births', 'ie_ratio', 'nonres_res_ratio', 'late_to_early')
+  for (i in 1:length(dep_vars)) {
+    plots[[i]] <- graph_df %>% 
+      filter(name == dep_vars[i]) %>% 
+      mutate(transformation = fct_relevel(transformation, 'untransformed')) %>% 
+      ggplot(aes(value)) +
+      geom_histogram() +
+      facet_wrap(~transformation, scales = 'free') +
+      labs(title = dep_vars[[i]], x = '', y = '') +
+      theme_minimal()
+  }
+  
+  # printing out the plots
+  
+  ggarrange(plots[[1]], plots[[2]], plots[[3]], plots[[4]]) %>% 
+    annotate_figure(left = textGrob('Count', rot = 90, vjust = 1),
+                    bottom = textGrob('Value'),
+                    top = text_grob('Dependent variables as approximately Gaussian distributions', 
+                                    size = 16)) 
+
+}
 
 # plot to justify including year as a factor rather than linear term in the models
 
 usa@data %>% 
-  group_by(year) %>% 
-  summarise(avg_rate = mean(abortion_per_1k_births)) %>% 
+  select(year, abortion_per_1k_births, ie_ratio, 
+         nonres_res_ratio, late_to_early) %>% 
+  pivot_longer(2:ncol(.), names_to = 'variable') %>% 
+  group_by(year, variable) %>% 
+  summarise(avg_rate = mean(value), 
+            .groups = 'drop') %>% 
   ggplot(aes(year, avg_rate)) +
   geom_point() +
-  geom_smooth()
+  geom_line() +
+  facet_wrap(~variable, scales = 'free_y') + 
+  theme_minimal() +
+  labs(title = 'Non-linear nature of year across variables') +
+  scale_x_continuous(breaks = 2010:2019)
 
 ```
 
 #### INTERPRET MORAN TEST
 
-Ignoring spatial dependence for the moment, we can fit a standard linear model
 
 ```{r rate_lm}
 
@@ -344,8 +389,6 @@ rates_inv_dist[[4]][1][[1]]
 
 ```
 
-We can also consider an OLS framework that accounts for heteroskedasticity in the errors by applying weights based on the number of births
-
 ```{r rate_wlm}
 
 # printing model output from the function that created all of the models
@@ -361,10 +404,6 @@ rates_inv_dist[[3]][2][[1]]
 rates_inv_dist[[4]][2][[1]]
 
 ```
-
-We still see evidence of spatial autocorrelation.
-
-I will try to adjust for this with a standard CAR model
 
 ```{r rate_car}
 
@@ -382,8 +421,6 @@ rates_inv_dist[[4]][3][[1]]
 
 ```
 
-Now I will perform a weighted car, with weights for the number of births occurring in the state
-
 ```{r rate_wcar}
 
 # printing model output from the function that created all of the models
@@ -400,8 +437,6 @@ rates_inv_dist[[4]][4][[1]]
 
 ```
 
-Now I will repeat the process with a standard SAR model, followed by a weighted SAR model
-
 ```{r rate_sar}
 
 # printing model output from the function that created all of the models
@@ -417,8 +452,6 @@ rates_inv_dist[[3]][5][[1]]
 rates_inv_dist[[4]][5][[1]]
 
 ```
-
-Repeating the process for the weighted SAR
 
 ```{r rate_wsar}
 
@@ -438,7 +471,7 @@ rates_inv_dist[[4]][6][[1]]
 
 ## Model Comparisons
 
-```{r comparisons}
+```{r rate_comparisons}
 
 # creating table to compare fit of various models
 
@@ -475,30 +508,36 @@ get_metrics_table(rates_inv_dist) %>%
                                   AIC_inv_dist > AIC_inv_dist2 & AIC_inv_dist2 < AIC_contig ~ 'dist2',
                                   AIC_contig < AIC_inv_dist2 & AIC_inv_dist > AIC_contig ~ 'contig',
                                   TRUE ~ ''),
-         best_weights = ifelse(best_weights == '', NA, best_weights))
+         best_weights = ifelse(best_weights == '', NA, best_weights)) %>% 
+  kable(caption = 'Model selection for abortion rates',
+        booktabs = TRUE)
 
 ```
 
-Each of the models is worsened by the use of weights based on the number of births (increased AIC and lower log-likelihood). This suggests that we should prefer the standard OLS, CAR, and SAR models over their weighted counterparts.
-
-The unweighted models have relatively comparable AIC scores, with the SAR model performing best with the lowest AIC score, followed by the CAR model and the OLS model. Ranking the models in terms of highest log-likelihood yields the same order.
-
-Collectively, these results suggest a standard SAR framework captures the earlier observed spatial autocorrelation in abortion rates.
-
 ## Inference on SAR Model
 
-### DOES ACCOUNTING FOR SPATIAL AUTOCORRELATION INTRODUCE COLLINEARITY WITH MY INTERSTATE POLICY SCORES? I need to graph the confidence intervals for each of the within-between coefficients
+ I need to graph the confidence intervals for each of the within-between coefficients
 (or I should think of other ways to visualize the within-between coefficients that also display which ones are significant)
 
 ```{r sar_inference}
 
+# printing moran test.. both this & the LR in the model summary have p-values <
+# 0.05... figure out what that means again
+
+rates_inv_dist[[3]][5][[1]]
+
+# printing diagnostic plots
+
+rates_inv_dist[[4]][5][[1]]
+
 # printing out coefficients for policy categories on our chosen model
 
-summary(rates_inv_dist[[2]][5][[1]])
-data.frame(coef(rates_inv_dist[[2]][5][[1]])) %>% 
+rate_sar <- rates_inv_dist[[2]][5][[1]]
+summary(rate_sar)
+data.frame(coef(rate_sar)) %>% 
   rownames_to_column('term') %>% 
   filter(str_detect(term, 'within_between')) %>% 
-  arrange(`coef.rates_inv_dist..2...5...1...`)
+  arrange(coef.rate_sar.)
 
 ```
 
@@ -646,7 +685,9 @@ get_metrics_table(ie_inv_dist) %>%
                                   AIC_inv_dist > AIC_inv_dist2 & AIC_inv_dist2 < AIC_contig ~ 'dist2',
                                   AIC_contig < AIC_inv_dist2 & AIC_inv_dist > AIC_contig ~ 'contig',
                                   TRUE ~ ''),
-         best_weights = ifelse(best_weights == '', NA, best_weights))
+         best_weights = ifelse(best_weights == '', NA, best_weights)) %>% 
+  kable(caption = 'Model selection for import-export ratios',
+        booktabs = TRUE)
 
 ```
 
@@ -843,7 +884,9 @@ get_metrics_table(nonres_res_inv_dist) %>%
                                   AIC_inv_dist > AIC_inv_dist2 & AIC_inv_dist2 < AIC_contig ~ 'dist2',
                                   AIC_contig < AIC_inv_dist2 & AIC_inv_dist > AIC_contig ~ 'contig',
                                   TRUE ~ ''),
-         best_weights = ifelse(best_weights == '', NA, best_weights))
+         best_weights = ifelse(best_weights == '', NA, best_weights)) %>% 
+  kable(caption = 'Model selection for nonresident-to-resident ratios',
+        booktabs = TRUE)
 
 ```
 
@@ -1038,13 +1081,15 @@ get_metrics_table(late_early_inv_dist) %>%
                                   AIC_inv_dist > AIC_inv_dist2 & AIC_inv_dist2 < AIC_contig ~ 'dist2',
                                   AIC_contig < AIC_inv_dist2 & AIC_inv_dist > AIC_contig ~ 'contig',
                                   TRUE ~ ''),
-         best_weights = ifelse(best_weights == '', NA, best_weights))
+         best_weights = ifelse(best_weights == '', NA, best_weights)) %>% 
+  kable(caption = 'Model selection for late-to-early ratios',
+        booktabs = TRUE)
 
 ```
 
 # are residuals good enough? or should I square-root transform while sacrificing interpretability? I also need to update the comments for this code about the coefficient interpretations
 
-```{r nonres_res_sar}
+```{r late_early_sar}
 
 # printing out coefficients for policy categories on our chosen model
 
@@ -1064,11 +1109,9 @@ late_early_inv_dist[[3]][5][[1]]
 
 late_early_inv_dist[[4]][5][[1]]
 
-# log(nonres/res - 1) = log((nonres-res) / res), so exponentiating coefficients
-# yields the multiplicative increase in the difference between nonresident and
-# resident abortions as a ratio of resident abortions... larger values means
-# that there are relatively more out-of-state abortions & smaller values mean
-# that there are relatively fewer out-of-state abortions
+# I currently have the raw late-to-early ratios, so larger coefficients indicate
+# that there is more likely to be a relatively higher number of later-term
+# abortions in states like these
 
 data.frame(coef(late_early_sar)) %>% 
   rownames_to_column('term') %>% 
