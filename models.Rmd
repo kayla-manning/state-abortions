@@ -3,46 +3,15 @@ title: Model Fitting on Abortion Rates
 output: html_document
 ---
 
-# Questions for Alex:
-
-- need to study what the p-values mean in model summary vs moran test again
-
 ```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
 
 knitr::opts_chunk$set(echo = TRUE,
                       warning = FALSE,
                       message = FALSE)
 
-# packages
+# calling helper file that reads in all packages, data, and homemade functions
 
-{
-  library(MASS)
-  library(tidyverse)
-  library(raster)
-  library(spdep)
-  library(spatialreg)
-  select <- dplyr::select
-  library(ggpubr)
-  library(knitr)
-  library(kableExtra)
-}
-
-# data
-
-combined <- read_csv('raw-data/combined_data.csv') %>% 
-  inner_join(
-    read.delim('https://www2.census.gov/geo/docs/reference/cenpop2020/CenPop2020_Mean_ST.txt') %>% 
-      separate(STATEFP.STNAME.POPULATION.LATITUDE.LONGITUDE, sep = ',',
-               into = c('statefip', 'state', 'population', 'latitude', 'longitude')) %>% 
-      mutate(across(c(latitude, longitude), as.numeric)) %>% 
-      select(state, latitude, longitude), by = 'state')
-
-# getting df that drops observations with NA in predictors/outcomes
-
-nbin_df <- combined %>% 
-  drop_na(abortions, births, intrastate_score, interstate_score,
-          pct_bachelors, total_population, prop_hisp, prop_nonwhite,
-          hh_income, dem_2party)
+source('model_helper.R')
 
 ```
 
@@ -60,7 +29,7 @@ nbin_df <- combined %>%
 
     # merging with data
 
-    usa <- merge(usa, nbin_df,
+    usa <- merge(usa, nonspatial_df,
                  by.x = 'NAME_1', by.y = 'state',
                  duplicateGeoms = TRUE, all.x = FALSE)
     
@@ -70,6 +39,8 @@ nbin_df <- combined %>%
                                        'low-low', 'med-low', 'high-low',
                                        'low-med', 'med-med', 'high-med',
                                        'low-high', 'med-high', 'high-high')
+    usa@data$within_between <- fct_relevel(usa@data$within_between,
+                                           'high-high')
     
   }
 
@@ -148,8 +119,6 @@ image(listw2mat(weights.inv.dist2)[,281:1],
 
 ## Testing for Spatial Autocorrelation
 
-** need to figure out what this actually means for the data **
-
 ```{r global_moran}
 
 # moran test on row-normalized weights for contiguous neighbors
@@ -166,137 +135,6 @@ moran.test(usa$abortion_per_1k_births,
 
 ```
 
-## Model fitting
-
-```{r rate_mod_function}
-
-methods <- c('lm', 'wlm', 'car', 'wcar', 'sar', 'wsar')
-weights_matrix <- weights.inv.dist
-
-# writing a function to fit all of the models
-
-make_models <- function(weights_matrix) {
-  
-  # creating each model object
-
-  rate_lm <- lm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                  prop_nonwhite + hh_income + dem_2party + as.factor(year),
-              data = usa@data)
-  rate_lmw <- lm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                  prop_nonwhite + hh_income + dem_2party + as.factor(year), 
-                 data = usa@data, 
-                 weights = births)
-  rate_car <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                  prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                 data = usa@data,
-                 family = 'CAR',
-                 listw = weights_matrix)
-  rate_wcar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                  prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                 data = usa@data,
-                 weights = births,
-                 family = 'CAR',
-                 listw = weights_matrix)
-  rate_sar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                  prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                 data = usa@data,
-                 family = 'SAR',
-                 listw = weights_matrix)
-  rate_wsar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                  prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                 data = usa@data,
-                 weights = births,
-                 family = 'SAR',
-                 listw = weights_matrix)
-  models <- list(rate_lm, rate_lmw, rate_car, rate_wcar, rate_sar, rate_wsar)
-  
-  
-  
-  morans <- vector('list', length = length(models))
-  plots <- vector('list', length = length(models))
-  
-  for (i in 1:length(models)) {
-    
-    ################
-    #### MORAN
-    ################
-    
-    {
-      # conducting a Moran test on each of the models, assessing whether (p < 0.05) or
-      # not (p >= 0.05) we have evidence of spatial autocorrelation not captured by
-      # the model...
-      # using built-in function for our lm objects, but it doesn't work on spautolm
-      # objects
-      
-      if (class(models[[i]]) == 'lm') {
-        morans[[i]] <- lm.morantest(models[[i]], listw = weights_matrix, alternative = 'two.sided')
-      }
-      
-      # conduct a Moran test of the residuals, where p < 0.05 provides sufficient
-      # evidence of additional autocorrelation not captured by the model
-      
-      else {
-        morans[[i]] <- moran.test(residuals(models[[i]]), listw = weights_matrix, alternative = 'two.sided')
-      }
-    }
-    
-    ################
-    #### PLOTS
-    ################
-    
-    {
-      # generating diagnostic plots for each model
-  
-      resid_vs_fit <- tibble(fit = fitted(models[[i]]), 
-             resid = residuals(models[[i]])) %>% 
-        ggplot(aes(fit, resid)) +
-        geom_point() +
-        geom_hline(yintercept = 0,
-                   color = 'red',
-                   linetype = 'dashed') +
-        theme_minimal() +
-        labs(title = 'Residuals vs. fitted values',
-             x = 'Fitted values',
-             y = 'Residuals')
-      plot_data <- tibble(fit = fitted(models[[i]]), 
-                          resid = residuals(models[[i]])) 
-      qqplot <- plot_data %>% 
-        ggplot(aes(sample = resid)) +
-        stat_qq() +
-        stat_qq_line(col = 'red') +
-        theme_minimal() +
-        labs(title = 'QQ-plot for normality of residuals',
-             x = 'Theoretical quantiles',
-             y = 'Sample quantiles')
-      
-      plots[[i]] <- annotate_figure(ggarrange(resid_vs_fit, qqplot),
-                                    top = text_grob(paste('Diagnosic plots for', methods[[i]]),size = 14))
-    }
-  }
-  
-  # I want to return the methods, models, moran tests, and diagnostic plots
-  
-  return_values <- list(methods, models, morans, plots)
-  return(return_values)
-
-}
-
-# generating the models and diagnostics for the two different weights matrices
-
-rates_inv_dist <- make_models(weights.inv.dist)
-rates_inv_dist2 <- make_models(weights.inv.dist2)
-rates_contig <- make_models(weights.contig.W)
-
-get_metrics_table(rates_inv_dist)
-
-rates_inv_dist[[2]][3]
-
-```
-
-### OLS
-
-#### SHOULD I SQRT THE Y-VALUES? even though it loses its easy interpretability & the difference in the distributions is pretty negligible
-
 ```{r distributions}
 
 #I want to plot all of the dependent variables & their respective
@@ -312,13 +150,13 @@ rates_inv_dist[[2]][3]
            late_to_early) %>% 
     pivot_longer(everything()) %>% 
     mutate(transformed = FALSE,
-           transformation = case_when(name == 'abortion_per_1k_births' ~ 'log(x)',
+           transformation = case_when(name == 'abortion_per_1k_births' ~ 'none',
                                       name == 'ie_ratio' ~ 'log(x)',
                                       name == 'nonres_res_ratio' ~ 'log(x - 1)',
                                       name == 'late_to_early' ~ 'none')) 
   
   graph_df <- untransformed %>% 
-    mutate(value = case_when(name == 'abortion_per_1k_births' ~ log(value),
+    mutate(value = case_when(name == 'abortion_per_1k_births' ~ value,
                                       name == 'ie_ratio' ~ log(value),
                                       name == 'nonres_res_ratio' ~ log(value-1),
                                       name == 'late_to_early' ~ value),
@@ -370,156 +208,29 @@ usa@data %>%
 
 ```
 
-#### INTERPRET MORAN TEST
+## Abortion rates
 
+```{r fit_rate_models}
 
-```{r rate_lm}
+# generating the models and diagnostics for the two different weights matrices
 
-# printing model output from the function that created all of the models
-
-summary(rates_inv_dist[[2]][1][[1]])
-
-# printing moran test
-
-rates_inv_dist[[3]][1][[1]]
-
-# printing diagnostic plots
-
-rates_inv_dist[[4]][1][[1]]
+rates_inv_dist <- make_rate_models(weights.inv.dist)
+rates_inv_dist2 <- make_rate_models(weights.inv.dist2)
+rates_contig <- make_rate_models(weights.contig.W)
 
 ```
-
-```{r rate_wlm}
-
-# printing model output from the function that created all of the models
-
-summary(rates_inv_dist[[2]][2][[1]])
-
-# printing moran test
-
-rates_inv_dist[[3]][2][[1]]
-
-# printing diagnostic plots
-
-rates_inv_dist[[4]][2][[1]]
-
-```
-
-```{r rate_car}
-
-# printing model output from the function that created all of the models
-
-summary(rates_inv_dist[[2]][3][[1]])
-
-# printing moran test
-
-rates_inv_dist[[3]][3][[1]]
-
-# printing diagnostic plots
-
-rates_inv_dist[[4]][3][[1]]
-
-```
-
-```{r rate_wcar}
-
-# printing model output from the function that created all of the models
-
-summary(rates_inv_dist[[2]][4][[1]])
-
-# printing moran test
-
-rates_inv_dist[[3]][4][[1]]
-
-# printing diagnostic plots
-
-rates_inv_dist[[4]][4][[1]]
-
-```
-
-```{r rate_sar}
-
-# printing model output from the function that created all of the models
-
-summary(rates_inv_dist[[2]][5][[1]])
-
-# printing moran test
-
-rates_inv_dist[[3]][5][[1]]
-
-# printing diagnostic plots
-
-rates_inv_dist[[4]][5][[1]]
-
-```
-
-```{r rate_wsar}
-
-# printing model output from the function that created all of the models
-
-summary(rates_inv_dist[[2]][6][[1]])
-
-# printing moran test
-
-rates_inv_dist[[3]][6][[1]]
-
-# printing diagnostic plots
-
-rates_inv_dist[[4]][6][[1]]
-
-```
-
-## Model Comparisons
 
 ```{r rate_comparisons}
 
 # creating table to compare fit of various models
 
-get_metrics <- function(mod) {
-  if (is.null(summary(mod)$lambda)) {
-    metrics <- c(AIC(mod), logLik(mod), NA, NA)
-  }
-  else {
-    metrics <- c(AIC(mod), logLik(mod), summary(mod)$lambda, summary(mod)$lambda.se)
-  }
-  return(metrics)
-}
-
-metrics <- c('AIC', 'logLik', 'lambda', 'lambda se')
-
-get_metrics_table <- function(model_list) {
-  tibble(method = rep(methods, each = length(metrics)),
-       metric = rep(metrics, times = length(methods)),
-       value = unlist(lapply(model_list[[2]], get_metrics))) %>% 
-    pivot_wider(names_from = metric, values_from = value)
-}
-
-get_metrics_table(rates_inv_dist) %>% 
-  mutate(weights = 'inv_dist') %>% 
-  bind_rows(get_metrics_table(rates_inv_dist2) %>% 
-              mutate(weights = 'inv_dist2')) %>% 
-  bind_rows(get_metrics_table(rates_contig) %>% 
-              mutate(weights = 'contig')) %>% 
-  select(method, AIC, weights) %>% 
-  pivot_wider(names_from = weights,
-              values_from = AIC,
-              names_prefix = 'AIC_') %>% 
-  mutate(best_weights = case_when(AIC_inv_dist < AIC_inv_dist2 & AIC_inv_dist < AIC_contig ~ 'dist',
-                                  AIC_inv_dist > AIC_inv_dist2 & AIC_inv_dist2 < AIC_contig ~ 'dist2',
-                                  AIC_contig < AIC_inv_dist2 & AIC_inv_dist > AIC_contig ~ 'contig',
-                                  TRUE ~ ''),
-         best_weights = ifelse(best_weights == '', NA, best_weights)) %>% 
+get_model_comparisons(rates_inv_dist, rates_inv_dist2, rates_contig)%>% 
   kable(caption = 'Model selection for abortion rates',
         booktabs = TRUE)
 
 ```
 
-## Inference on SAR Model
-
- I need to graph the confidence intervals for each of the within-between coefficients
-(or I should think of other ways to visualize the within-between coefficients that also display which ones are significant)
-
-```{r sar_inference}
+```{r rate_sar}
 
 # printing moran test.. both this & the LR in the model summary have p-values <
 # 0.05... figure out what that means again
@@ -539,130 +250,25 @@ data.frame(coef(rate_sar)) %>%
   filter(str_detect(term, 'within_between')) %>% 
   arrange(coef.rate_sar.)
 
-```
+# creating the plot for the rate object
 
-# Other dependent variables
+get_coef_plot(rate_sar) +
+  labs(title = 'All policy categories are associated with lower abortion rates \nthan the most restricted states') +
+  geom_vline(xintercept = 0,
+             color = 'red',
+             linetype = 'dotted')
+
+```
 
 ## Import-export ratio
 
-```{r ie_mod_function}
-
-methods <- c('lm', 'wlm', 'car', 'wcar', 'sar', 'wsar')
-weights_matrix <- weights.inv.dist
-
-# writing a function to fit all of the models
-
-make_models <- function(weights_matrix) {
-  
-  # creating each model object
-
-  rate_lm <- lm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                       prop_nonwhite + hh_income + dem_2party + as.factor(year),
-              data = usa@data)
-  rate_lmw <- lm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                       prop_nonwhite + hh_income + dem_2party + as.factor(year), 
-                 data = usa@data, 
-                 weights = births)
-  rate_car <- spautolm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                       prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                 data = usa@data,
-                 family = 'CAR',
-                 listw = weights_matrix)
-  rate_wcar <- spautolm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                       prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                 data = usa@data,
-                 weights = births,
-                 family = 'CAR',
-                 listw = weights_matrix)
-  rate_sar <- spautolm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                       prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                 data = usa@data,
-                 family = 'SAR',
-                 listw = weights_matrix)
-  rate_wsar <- spautolm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                       prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                 data = usa@data,
-                 weights = births,
-                 family = 'SAR',
-                 listw = weights_matrix)
-  models <- list(rate_lm, rate_lmw, rate_car, rate_wcar, rate_sar, rate_wsar)
-  
-  
-  
-  morans <- vector('list', length = length(models))
-  plots <- vector('list', length = length(models))
-  
-  for (i in 1:length(models)) {
-    
-    ################
-    #### MORAN
-    ################
-    
-    {
-      # conducting a Moran test on each of the models, assessing whether (p < 0.05) or
-      # not (p >= 0.05) we have evidence of spatial autocorrelation not captured by
-      # the model...
-      # using built-in function for our lm objects, but it doesn't work on spautolm
-      # objects
-      
-      if (class(models[[i]]) == 'lm') {
-        morans[[i]] <- lm.morantest(models[[i]], listw = weights_matrix, alternative = 'two.sided')
-      }
-      
-      # conduct a Moran test of the residuals, where p < 0.05 provides sufficient
-      # evidence of additional autocorrelation not captured by the model
-      
-      else {
-        morans[[i]] <- moran.test(residuals(models[[i]]), listw = weights_matrix, alternative = 'two.sided')
-      }
-    }
-    
-    ################
-    #### PLOTS
-    ################
-    
-    {
-      # generating diagnostic plots for each model
-  
-      resid_vs_fit <- tibble(fit = fitted(models[[i]]), 
-             resid = residuals(models[[i]])) %>% 
-        ggplot(aes(fit, resid)) +
-        geom_point() +
-        geom_hline(yintercept = 0,
-                   color = 'red',
-                   linetype = 'dashed') +
-        theme_minimal() +
-        labs(title = 'Residuals vs. fitted values',
-             x = 'Fitted values',
-             y = 'Residuals')
-      plot_data <- tibble(fit = fitted(models[[i]]), 
-                          resid = residuals(models[[i]])) 
-      qqplot <- plot_data %>% 
-        ggplot(aes(sample = resid)) +
-        stat_qq() +
-        stat_qq_line(col = 'red') +
-        theme_minimal() +
-        labs(title = 'QQ-plot for normality of residuals',
-             x = 'Theoretical quantiles',
-             y = 'Sample quantiles')
-      
-      plots[[i]] <- annotate_figure(ggarrange(resid_vs_fit, qqplot),
-                                    top = text_grob(paste('Diagnosic plots for', methods[[i]]),size = 14))
-    }
-  }
-  
-  # I want to return the methods, models, moran tests, and diagnostic plots
-  
-  return_values <- list(methods, models, morans, plots)
-  return(return_values)
-
-}
+```{r fit_ie_models}
 
 # generating the models and diagnostics for the two different weights matrices
 
-ie_inv_dist <- make_models(weights.inv.dist)
-ie_inv_dist2 <- make_models(weights.inv.dist2)
-ie_contig <- make_models(weights.contig.W)
+ie_inv_dist <- make_ie_models(weights.inv.dist)
+ie_inv_dist2 <- make_ie_models(weights.inv.dist2)
+ie_contig <- make_ie_models(weights.contig.W)
 
 ```
 
@@ -671,21 +277,10 @@ ie_contig <- make_models(weights.contig.W)
 # producing table as I did before... lowest AIC observed in SAR model with
 # inv_dist weights
 
-get_metrics_table(ie_inv_dist) %>% 
-  mutate(weights = 'inv_dist') %>% 
-  bind_rows(get_metrics_table(ie_inv_dist2) %>% 
-              mutate(weights = 'inv_dist2')) %>% 
-  bind_rows(get_metrics_table(ie_contig) %>% 
-              mutate(weights = 'contig')) %>% 
-  select(method, AIC, weights) %>% 
-  pivot_wider(names_from = weights,
-              values_from = AIC,
-              names_prefix = 'AIC_') %>% 
-  mutate(best_weights = case_when(AIC_inv_dist < AIC_inv_dist2 & AIC_inv_dist < AIC_contig ~ 'dist',
-                                  AIC_inv_dist > AIC_inv_dist2 & AIC_inv_dist2 < AIC_contig ~ 'dist2',
-                                  AIC_contig < AIC_inv_dist2 & AIC_inv_dist > AIC_contig ~ 'contig',
-                                  TRUE ~ ''),
-         best_weights = ifelse(best_weights == '', NA, best_weights)) %>% 
+# producing table as I did before... lowest AIC observed in SAR model with
+# inv_dist weights
+
+get_model_comparisons(ie_inv_dist, ie_inv_dist2, ie_contig) %>% 
   kable(caption = 'Model selection for import-export ratios',
         booktabs = TRUE)
 
@@ -725,139 +320,28 @@ data.frame(coef(ie_sar)) %>%
   arrange(coef.ie_sar.) %>% 
   rename(exp_coef = coef.ie_sar.)
 
-```
+stargazer::stargazer(ie_sar)
 
+# printing list of significant coefficients
+
+get_summary_df(ie_sar) %>% 
+  filter(str_detect(term, 'within_between'))
+
+# getting coefficient plot
+
+get_coef_plot(ie_sar) +
+  geom_vline(xintercept = log(1),
+             color = 'red', 
+             linetype = 'dotted') +
+  labs(title = 'States with less strict surroundings tend to have fewer people traveling in \nand more people traveling out')
+
+```
 
 ## Nonresident-resident ratio
 
 ```{r nonres_mod_function}
 
-# transforming the variable so that it's approximately normally distributed
-
-hist(usa@data$nonres_res_ratio)
-hist(log(usa@data$nonres_res_ratio - 1))
-
-# copied code from above functions but changed the model terms to match the
-# nonres-res specification
-
-methods <- c('lm', 'wlm', 'car', 'wcar', 'sar', 'wsar')
-weights_matrix <- weights.inv.dist
-
-# writing a function to fit all of the models
-
-make_models <- function(weights_matrix) {
-  
-  # creating each model object
-
-  rate_lm <- lm(log(nonres_res_ratio-1) ~ within_between + pct_bachelors + 
-                  prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                  as.factor(year),
-              data = usa@data)
-  rate_lmw <- lm(log(nonres_res_ratio-1) ~ within_between + pct_bachelors + 
-                  prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                  as.factor(year), 
-                 data = usa@data, 
-                 weights = births)
-  rate_car <- spautolm(log(nonres_res_ratio-1) ~ within_between + pct_bachelors + 
-                  prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                  as.factor(year),
-                 data = usa@data,
-                 family = 'CAR',
-                 listw = weights_matrix)
-  rate_wcar <- spautolm(log(nonres_res_ratio-1) ~ within_between + pct_bachelors + 
-                  prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                  as.factor(year),
-                 data = usa@data,
-                 weights = births,
-                 family = 'CAR',
-                 listw = weights_matrix)
-  rate_sar <- spautolm(log(nonres_res_ratio-1) ~ within_between + pct_bachelors + 
-                  prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                  as.factor(year),
-                 data = usa@data,
-                 family = 'SAR',
-                 listw = weights_matrix)
-  rate_wsar <- spautolm(log(nonres_res_ratio-1) ~ within_between + pct_bachelors + 
-                  prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                  as.factor(year),
-                 data = usa@data,
-                 weights = births,
-                 family = 'SAR',
-                 listw = weights_matrix)
-  models <- list(rate_lm, rate_lmw, rate_car, rate_wcar, rate_sar, rate_wsar)
-  
-  
-  
-  morans <- vector('list', length = length(models))
-  plots <- vector('list', length = length(models))
-  
-  for (i in 1:length(models)) {
-    
-    ################
-    #### MORAN
-    ################
-    
-    {
-      # conducting a Moran test on each of the models, assessing whether (p < 0.05) or
-      # not (p >= 0.05) we have evidence of spatial autocorrelation not captured by
-      # the model...
-      # using built-in function for our lm objects, but it doesn't work on spautolm
-      # objects
-      
-      if (class(models[[i]]) == 'lm') {
-        morans[[i]] <- lm.morantest(models[[i]], listw = weights_matrix, alternative = 'two.sided')
-      }
-      
-      # conduct a Moran test of the residuals, where p < 0.05 provides sufficient
-      # evidence of additional autocorrelation not captured by the model
-      
-      else {
-        morans[[i]] <- moran.test(residuals(models[[i]]), listw = weights_matrix, alternative = 'two.sided')
-      }
-    }
-    
-    ################
-    #### PLOTS
-    ################
-    
-    {
-      # generating diagnostic plots for each model
-  
-      resid_vs_fit <- tibble(fit = fitted(models[[i]]), 
-             resid = residuals(models[[i]])) %>% 
-        ggplot(aes(fit, resid)) +
-        geom_point() +
-        geom_hline(yintercept = 0,
-                   color = 'red',
-                   linetype = 'dashed') +
-        theme_minimal() +
-        labs(title = 'Residuals vs. fitted values',
-             x = 'Fitted values',
-             y = 'Residuals')
-      plot_data <- tibble(fit = fitted(models[[i]]), 
-                          resid = residuals(models[[i]])) 
-      qqplot <- plot_data %>% 
-        ggplot(aes(sample = resid)) +
-        stat_qq() +
-        stat_qq_line(col = 'red') +
-        theme_minimal() +
-        labs(title = 'QQ-plot for normality of residuals',
-             x = 'Theoretical quantiles',
-             y = 'Sample quantiles')
-      
-      plots[[i]] <- annotate_figure(ggarrange(resid_vs_fit, qqplot),
-                                    top = text_grob(paste('Diagnosic plots for', methods[[i]]),size = 14))
-    }
-  }
-  
-  # I want to return the methods, models, moran tests, and diagnostic plots
-  
-  return_values <- list(methods, models, morans, plots)
-  return(return_values)
-
-}
-
-# generating the models and diagnostics for the two different weights matrices
+# generating the models and diagnostics for the three different weights matrices
 
 nonres_res_inv_dist <- make_models(weights.inv.dist)
 nonres_res_inv_dist2 <- make_models(weights.inv.dist2)
@@ -870,21 +354,7 @@ nonres_res_contig <- make_models(weights.contig.W)
 # producing table as I did before... lowest AIC observed in SAR model with
 # inv_dist weights
 
-get_metrics_table(nonres_res_inv_dist) %>% 
-  mutate(weights = 'inv_dist') %>% 
-  bind_rows(get_metrics_table(nonres_res_inv_dist2) %>% 
-              mutate(weights = 'inv_dist2')) %>% 
-  bind_rows(get_metrics_table(nonres_res_contig) %>% 
-              mutate(weights = 'contig')) %>% 
-  select(method, AIC, weights) %>% 
-  pivot_wider(names_from = weights,
-              values_from = AIC,
-              names_prefix = 'AIC_') %>% 
-  mutate(best_weights = case_when(AIC_inv_dist < AIC_inv_dist2 & AIC_inv_dist < AIC_contig ~ 'dist',
-                                  AIC_inv_dist > AIC_inv_dist2 & AIC_inv_dist2 < AIC_contig ~ 'dist2',
-                                  AIC_contig < AIC_inv_dist2 & AIC_inv_dist > AIC_contig ~ 'contig',
-                                  TRUE ~ ''),
-         best_weights = ifelse(best_weights == '', NA, best_weights)) %>% 
+get_model_comparisons(nonres_res_inv_dist, nonres_res_inv_dist2, nonres_res_contig) %>% 
   kable(caption = 'Model selection for nonresident-to-resident ratios',
         booktabs = TRUE)
 
@@ -923,6 +393,16 @@ data.frame(coef(nonres_res_sar)) %>%
   arrange(desc(coef.nonres_res_sar.)) %>% 
   rename(exp_coef = coef.nonres_res_sar.)
 
+# creating my plot of coefficients
+
+get_coef_plot(nonres_res_sar) +
+  geom_vline(xintercept = log(1),
+             color = 'red', 
+             linetype = 'dotted') +
+  labs(title = 'States with less strict surroundings have significantly fewer people traveling in \nand more people traveling out',
+       subtitle = 'Relative to high-high reference group')
+  
+
 ```
 
 ## Late-to-early ratio
@@ -936,129 +416,11 @@ data.frame(coef(nonres_res_sar)) %>%
 hist(usa@data$late_to_early)
 hist(sqrt(usa@data$late_to_early))
 
-# copied code from above functions but changed the model terms to match the
-# nonres-res specification
-
-methods <- c('lm', 'wlm', 'car', 'wcar', 'sar', 'wsar')
-weights_matrix <- weights.inv.dist
-
-# writing a function to fit all of the models
-
-make_models <- function(weights_matrix) {
-  
-  # creating each model object
-
-  rate_lm <- lm(late_to_early ~ within_between + pct_bachelors + 
-                  prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                  as.factor(year),
-              data = usa@data)
-  rate_lmw <- lm(late_to_early ~ within_between + pct_bachelors + 
-                  prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                  as.factor(year), 
-                 data = usa@data, 
-                 weights = births)
-  rate_car <- spautolm(late_to_early ~ within_between + pct_bachelors + 
-                  prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                  as.factor(year),
-                 data = usa@data,
-                 family = 'CAR',
-                 listw = weights_matrix)
-  rate_wcar <- spautolm(late_to_early ~ within_between + pct_bachelors + 
-                  prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                  as.factor(year),
-                 data = usa@data,
-                 weights = births,
-                 family = 'CAR',
-                 listw = weights_matrix)
-  rate_sar <- spautolm(late_to_early ~ within_between + pct_bachelors + 
-                  prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                  as.factor(year),
-                 data = usa@data,
-                 family = 'SAR',
-                 listw = weights_matrix)
-  rate_wsar <- spautolm(late_to_early ~ within_between + pct_bachelors + 
-                  prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                  as.factor(year),
-                 data = usa@data,
-                 weights = births,
-                 family = 'SAR',
-                 listw = weights_matrix)
-  models <- list(rate_lm, rate_lmw, rate_car, rate_wcar, rate_sar, rate_wsar)
-  
-  morans <- vector('list', length = length(models))
-  plots <- vector('list', length = length(models))
-  
-  for (i in 1:length(models)) {
-    
-    ################
-    #### MORAN
-    ################
-    
-    {
-      # conducting a Moran test on each of the models, assessing whether (p < 0.05) or
-      # not (p >= 0.05) we have evidence of spatial autocorrelation not captured by
-      # the model...
-      # using built-in function for our lm objects, but it doesn't work on spautolm
-      # objects
-      
-      if (class(models[[i]]) == 'lm') {
-        morans[[i]] <- lm.morantest(models[[i]], listw = weights_matrix, alternative = 'two.sided')
-      }
-      
-      # conduct a Moran test of the residuals, where p < 0.05 provides sufficient
-      # evidence of additional autocorrelation not captured by the model
-      
-      else {
-        morans[[i]] <- moran.test(residuals(models[[i]]), listw = weights_matrix, alternative = 'two.sided')
-      }
-    }
-    
-    ################
-    #### PLOTS
-    ################
-    
-    {
-      # generating diagnostic plots for each model
-  
-      resid_vs_fit <- tibble(fit = fitted(models[[i]]), 
-             resid = residuals(models[[i]])) %>% 
-        ggplot(aes(fit, resid)) +
-        geom_point() +
-        geom_hline(yintercept = 0,
-                   color = 'red',
-                   linetype = 'dashed') +
-        theme_minimal() +
-        labs(title = 'Residuals vs. fitted values',
-             x = 'Fitted values',
-             y = 'Residuals')
-      plot_data <- tibble(fit = fitted(models[[i]]), 
-                          resid = residuals(models[[i]])) 
-      qqplot <- plot_data %>% 
-        ggplot(aes(sample = resid)) +
-        stat_qq() +
-        stat_qq_line(col = 'red') +
-        theme_minimal() +
-        labs(title = 'QQ-plot for normality of residuals',
-             x = 'Theoretical quantiles',
-             y = 'Sample quantiles')
-      
-      plots[[i]] <- annotate_figure(ggarrange(resid_vs_fit, qqplot),
-                                    top = text_grob(paste('Diagnosic plots for', methods[[i]]),size = 14))
-    }
-  }
-  
-  # I want to return the methods, models, moran tests, and diagnostic plots
-  
-  return_values <- list(methods, models, morans, plots)
-  return(return_values)
-
-}
-
 # generating the models and diagnostics for the two different weights matrices
 
-late_early_inv_dist <- make_models(weights.inv.dist)
-late_early_inv_dist2 <- make_models(weights.inv.dist2)
-late_early_contig <- make_models(weights.contig.W)
+late_early_inv_dist <- make_late_early_models(weights.inv.dist)
+late_early_inv_dist2 <- make_late_early_models(weights.inv.dist2)
+late_early_contig <- make_late_early_models(weights.contig.W)
 
 ```
 
@@ -1067,47 +429,18 @@ late_early_contig <- make_models(weights.contig.W)
 # producing table as I did before... lowest AIC observed in SAR model with
 # inv_dist weights
 
-get_metrics_table(late_early_inv_dist) %>% 
-  mutate(weights = 'inv_dist') %>% 
-  bind_rows(get_metrics_table(late_early_inv_dist2) %>% 
-              mutate(weights = 'inv_dist2')) %>% 
-  bind_rows(get_metrics_table(late_early_contig) %>% 
-              mutate(weights = 'contig')) %>% 
-  select(method, AIC, weights) %>% 
-  pivot_wider(names_from = weights,
-              values_from = AIC,
-              names_prefix = 'AIC_') %>% 
-  mutate(best_weights = case_when(AIC_inv_dist < AIC_inv_dist2 & AIC_inv_dist < AIC_contig ~ 'dist',
-                                  AIC_inv_dist > AIC_inv_dist2 & AIC_inv_dist2 < AIC_contig ~ 'dist2',
-                                  AIC_contig < AIC_inv_dist2 & AIC_inv_dist > AIC_contig ~ 'contig',
-                                  TRUE ~ ''),
-         best_weights = ifelse(best_weights == '', NA, best_weights)) %>% 
+get_model_comparisons(late_early_inv_dist, late_early_inv_dist2, late_early_contig) %>% 
   kable(caption = 'Model selection for late-to-early ratios',
         booktabs = TRUE)
 
 ```
 
-# are residuals good enough? or should I square-root transform while sacrificing interpretability? I also need to update the comments for this code about the coefficient interpretations
-
 ```{r late_early_sar}
 
 # printing out coefficients for policy categories on our chosen model
 
-late_early_sar <- late_early_inv_dist[[2]][5][[1]]
+late_early_sar <- late_early_inv_dist2[[2]][5][[1]]
 summary(late_early_sar)
-data.frame(coef(late_early_sar)) %>% 
-  rownames_to_column('term') %>% 
-  filter(str_detect(term, 'within_between')) %>% 
-  arrange(coef.late_early_sar.)
-
-# printing moran test.. both this & the LR in the model summary have p-values <
-# 0.05... figure out what that means again
-
-late_early_inv_dist[[3]][5][[1]]
-
-# printing diagnostic plots
-
-late_early_inv_dist[[4]][5][[1]]
 
 # I currently have the raw late-to-early ratios, so larger coefficients indicate
 # that there is more likely to be a relatively higher number of later-term
@@ -1116,9 +449,25 @@ late_early_inv_dist[[4]][5][[1]]
 data.frame(coef(late_early_sar)) %>% 
   rownames_to_column('term') %>% 
   filter(str_detect(term, 'within_between')) %>% 
-  mutate(coef.late_early_sar. = exp(coef.late_early_sar.)) %>% 
-  arrange(desc(coef.late_early_sar.)) %>% 
-  rename(exp_coef = coef.late_early_sar.)
+  arrange(coef.late_early_sar.)
+
+# printing moran test.. both this & the LR in the model summary have p-values <
+# 0.05... figure out what that means again
+
+late_early_inv_dist2[[3]][5][[1]]
+
+# printing diagnostic plots
+
+late_early_inv_dist2[[4]][5][[1]]
+
+# plotting coefficients
+
+get_coef_plot(late_early_sar) +
+  geom_vline(xintercept = 0,
+             color = 'red',
+             linetype = 'dotted') +
+  labs(title = 'States with less strict surroundings tend to have significantly lower \nlate-to-early ratios')
+  
 
 ```
 
