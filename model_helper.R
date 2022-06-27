@@ -18,6 +18,7 @@
     library(ggpubr)
     library(knitr)
     library(kableExtra)
+    library(janitor)
   }
   
   # data
@@ -46,7 +47,7 @@
 # model fitting & associated diagnostics (moran test, qqplot/residual plot,
 # model output, etc.)
 {
-  methods <- c('lm', 'wlm', 'car', 'wcar', 'sar', 'wsar')
+  methods <- c('lm', 'car', 'sar')
   
   # fitting models for abortion rates
   {
@@ -59,33 +60,17 @@
       rate_lm <- lm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
                       prop_nonwhite + hh_income + dem_2party + as.factor(year),
                     data = usa@data)
-      rate_lmw <- lm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                       prop_nonwhite + hh_income + dem_2party + as.factor(year), 
-                     data = usa@data, 
-                     weights = births)
       rate_car <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
                              prop_nonwhite + hh_income + dem_2party + as.factor(year),
                            data = usa@data,
                            family = 'CAR',
                            listw = weights_matrix)
-      rate_wcar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                              prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                            data = usa@data,
-                            weights = births,
-                            family = 'CAR',
-                            listw = weights_matrix)
       rate_sar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
                              prop_nonwhite + hh_income + dem_2party + as.factor(year),
                            data = usa@data,
                            family = 'SAR',
                            listw = weights_matrix)
-      rate_wsar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                              prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                            data = usa@data,
-                            weights = births,
-                            family = 'SAR',
-                            listw = weights_matrix)
-      models <- list(rate_lm, rate_lmw, rate_car, rate_wcar, rate_sar, rate_wsar)
+      models <- list(rate_lm, rate_car, rate_sar)
       
       
       
@@ -169,35 +154,22 @@
       # creating each model object
       
       rate_lm <- lm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                      prop_nonwhite + hh_income + dem_2party + as.factor(year),
+                      prop_nonwhite + hh_income + dem_2party + as.factor(year) +
+                      abortions,
                     data = usa@data)
-      rate_lmw <- lm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                       prop_nonwhite + hh_income + dem_2party + as.factor(year), 
-                     data = usa@data, 
-                     weights = births)
       rate_car <- spautolm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                             prop_nonwhite + hh_income + dem_2party + as.factor(year),
+                             prop_nonwhite + hh_income + dem_2party + as.factor(year) +
+                             abortions,
                            data = usa@data,
                            family = 'CAR',
                            listw = weights_matrix)
-      rate_wcar <- spautolm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                              prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                            data = usa@data,
-                            weights = births,
-                            family = 'CAR',
-                            listw = weights_matrix)
       rate_sar <- spautolm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                             prop_nonwhite + hh_income + dem_2party + as.factor(year),
+                             prop_nonwhite + hh_income + dem_2party + as.factor(year) +
+                             abortions,
                            data = usa@data,
                            family = 'SAR',
                            listw = weights_matrix)
-      rate_wsar <- spautolm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                              prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                            data = usa@data,
-                            weights = births,
-                            family = 'SAR',
-                            listw = weights_matrix)
-      models <- list(rate_lm, rate_lmw, rate_car, rate_wcar, rate_sar, rate_wsar)
+      models <- list(rate_lm, rate_car, rate_sar)
       
       
       
@@ -283,38 +255,19 @@
                       prop_hisp + prop_nonwhite + hh_income + dem_2party +
                       as.factor(year),
                     data = usa@data)
-      rate_lmw <- lm(log(nonres_res_ratio-1) ~ within_between + pct_bachelors + 
-                       prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                       as.factor(year), 
-                     data = usa@data, 
-                     weights = births)
       rate_car <- spautolm(log(nonres_res_ratio-1) ~ within_between + pct_bachelors + 
                              prop_hisp + prop_nonwhite + hh_income + dem_2party +
                              as.factor(year),
                            data = usa@data,
                            family = 'CAR',
                            listw = weights_matrix)
-      rate_wcar <- spautolm(log(nonres_res_ratio-1) ~ within_between + pct_bachelors + 
-                              prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                              as.factor(year),
-                            data = usa@data,
-                            weights = births,
-                            family = 'CAR',
-                            listw = weights_matrix)
       rate_sar <- spautolm(log(nonres_res_ratio-1) ~ within_between + pct_bachelors + 
                              prop_hisp + prop_nonwhite + hh_income + dem_2party +
                              as.factor(year),
                            data = usa@data,
                            family = 'SAR',
                            listw = weights_matrix)
-      rate_wsar <- spautolm(log(nonres_res_ratio-1) ~ within_between + pct_bachelors + 
-                              prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                              as.factor(year),
-                            data = usa@data,
-                            weights = births,
-                            family = 'SAR',
-                            listw = weights_matrix)
-      models <- list(rate_lm, rate_lmw, rate_car, rate_wcar, rate_sar, rate_wsar)
+      models <- list(rate_lm, rate_car, rate_sar)
       
       
       
@@ -398,40 +351,21 @@
       
       rate_lm <- lm(sqrt(late_to_early) ~ within_between + pct_bachelors + 
                       prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                      as.factor(year),
+                      abortions + as.factor(year),
                     data = usa@data)
-      rate_lmw <- lm(sqrt(late_to_early) ~ within_between + pct_bachelors + 
-                       prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                       as.factor(year), 
-                     data = usa@data, 
-                     weights = births)
       rate_car <- spautolm(sqrt(late_to_early) ~ within_between + pct_bachelors + 
                              prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                             as.factor(year),
+                             abortions + as.factor(year),
                            data = usa@data,
                            family = 'CAR',
                            listw = weights_matrix)
-      rate_wcar <- spautolm(sqrt(late_to_early) ~ within_between + pct_bachelors + 
-                              prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                              as.factor(year),
-                            data = usa@data,
-                            weights = births,
-                            family = 'CAR',
-                            listw = weights_matrix)
       rate_sar <- spautolm(sqrt(late_to_early) ~ within_between + pct_bachelors + 
                              prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                             as.factor(year),
+                             abortions + as.factor(year),
                            data = usa@data,
                            family = 'SAR',
                            listw = weights_matrix)
-      rate_wsar <- spautolm(sqrt(late_to_early) ~ within_between + pct_bachelors + 
-                              prop_hisp + prop_nonwhite + hh_income + dem_2party +
-                              as.factor(year),
-                            data = usa@data,
-                            weights = births,
-                            family = 'SAR',
-                            listw = weights_matrix)
-      models <- list(rate_lm, rate_lmw, rate_car, rate_wcar, rate_sar, rate_wsar)
+      models <- list(rate_lm, rate_car, rate_sar)
       
       morans <- vector('list', length = length(models))
       plots <- vector('list', length = length(models))
@@ -533,7 +467,7 @@
   # specifications)
   
   get_model_comparisons <- function(inv_dist_list, inv_dist2_list, contig_list) {
-    inv_dist_list <- rates_inv_dist
+    inv_dist_list <- inv_dist_list
     get_metrics_table(inv_dist_list) %>% 
       mutate(weights = 'inv_dist') %>% 
       bind_rows(get_metrics_table(inv_dist2_list) %>% 
@@ -582,3 +516,19 @@
            subtitle = 'Relative to high-high reference group')
   }
 }
+
+sar_mod <- ie_sar
+get_summary_df(sar_mod) %>% 
+  filter(str_detect(term, 'within_between')) %>% 
+  mutate(conf.low = exp(estimate - qnorm(0.975)*std_error),
+         conf.high = exp(estimate + qnorm(0.975)*std_error),
+         estimate = exp(estimate),
+         term = str_remove_all(term, 'within_between')) %>% 
+  select(term, estimate, conf.low, conf.high) %>% 
+  ggplot(aes(estimate, fct_reorder(term, estimate))) +
+  geom_point() +
+  geom_errorbar(aes(xmin = conf.low, xmax = conf.high)) +
+  theme_minimal() +
+  labs(x = 'exp(coefficient)',
+       y = 'Policy category',
+       subtitle = 'Relative to high-high reference group')

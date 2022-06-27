@@ -15,14 +15,11 @@
     library(readxl)
     library(janitor)
     library(zoo)
+    library(tabulizer)
     
     # dealing with NA data
     
     library(naniar)
-    
-    # mixed effects modeling
-    
-    library(lme4)
     
     # helping format tables
     

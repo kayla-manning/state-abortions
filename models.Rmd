@@ -51,7 +51,6 @@ source('model_helper.R')
   ### POINTS LESS THAN SNAP DISTANCE APART AS NEIGHBORS... STATES THAT DO NOT
   ### SHARE BOUNDARIES ARE STILL CLOSE TO ONE ANOTHER AND HAVE REASONABLE
   ### SPILLOVER / REGIONAL CORRELATION **********
-  # maybe specify neighbors with dnearneigh instead?
 
   # usa_contig <- poly2nb(usa, queen=FALSE)
 
@@ -130,6 +129,10 @@ moran.test(usa$abortion_per_1k_births,
 
 moran.test(usa$abortion_per_1k_births,
            listw = weights.inv.dist)
+moran.mc(usa@data$abortion_per_1k_births,
+         listw = weights.inv.dist,
+         nsim = 9999)
+
 moran.test(usa$abortion_per_1k_births,
            listw = weights.inv.dist2)
 
@@ -235,15 +238,15 @@ get_model_comparisons(rates_inv_dist, rates_inv_dist2, rates_contig)%>%
 # printing moran test.. both this & the LR in the model summary have p-values <
 # 0.05... figure out what that means again
 
-rates_inv_dist[[3]][5][[1]]
+rates_inv_dist[[3]][3][[1]]
 
 # printing diagnostic plots
 
-rates_inv_dist[[4]][5][[1]]
+rates_inv_dist[[4]][3][[1]]
 
 # printing out coefficients for policy categories on our chosen model
 
-rate_sar <- rates_inv_dist[[2]][5][[1]]
+rate_sar <- rates_inv_dist[[2]][3][[1]]
 summary(rate_sar)
 data.frame(coef(rate_sar)) %>% 
   rownames_to_column('term') %>% 
@@ -290,7 +293,7 @@ get_model_comparisons(ie_inv_dist, ie_inv_dist2, ie_contig) %>%
 
 # printing out coefficients for policy categories on our chosen model
 
-ie_sar <- ie_inv_dist[[2]][5][[1]]
+ie_sar <- ie_inv_dist[[2]][3][[1]]
 summary(ie_sar)
 data.frame(coef(ie_sar)) %>% 
   rownames_to_column('term') %>% 
@@ -300,11 +303,11 @@ data.frame(coef(ie_sar)) %>%
 # printing moran test.. both this & the LR in the model summary have p-values <
 # 0.05... figure out what that means again
 
-ie_inv_dist[[3]][5][[1]]
+ie_inv_dist[[3]][3][[1]]
 
 # printing diagnostic plots
 
-ie_inv_dist[[4]][5][[1]]
+ie_inv_dist[[4]][3][[1]]
 
 # getting coefficients ready to interpret... higher IE ratio indicates that more
 # people travel in the state and few people leave the state.... lower ratios
@@ -329,8 +332,21 @@ get_summary_df(ie_sar) %>%
 
 # getting coefficient plot
 
-get_coef_plot(ie_sar) +
-  geom_vline(xintercept = log(1),
+get_summary_df(ie_sar) %>% 
+  filter(str_detect(term, 'within_between')) %>% 
+  mutate(conf.low = exp(estimate - qnorm(0.975)*std_error),
+         conf.high = exp(estimate + qnorm(0.975)*std_error),
+         estimate = exp(estimate),
+         term = str_remove_all(term, 'within_between')) %>% 
+  select(term, estimate, conf.low, conf.high) %>% 
+  ggplot(aes(estimate, fct_reorder(term, estimate))) +
+  geom_point() +
+  geom_errorbar(aes(xmin = conf.low, xmax = conf.high)) +
+  theme_minimal() +
+  labs(x = 'exp(coefficient)',
+       y = 'Policy category',
+       subtitle = 'Relative to high-high reference group') +
+  geom_vline(xintercept = 1,
              color = 'red', 
              linetype = 'dotted') +
   labs(title = 'States with less strict surroundings tend to have fewer people traveling in \nand more people traveling out')
@@ -343,9 +359,9 @@ get_coef_plot(ie_sar) +
 
 # generating the models and diagnostics for the three different weights matrices
 
-nonres_res_inv_dist <- make_models(weights.inv.dist)
-nonres_res_inv_dist2 <- make_models(weights.inv.dist2)
-nonres_res_contig <- make_models(weights.contig.W)
+nonres_res_inv_dist <- make_nonres_res_models(weights.inv.dist)
+nonres_res_inv_dist2 <- make_nonres_res_models(weights.inv.dist2)
+nonres_res_contig <- make_nonres_res_models(weights.contig.W)
 
 ```
 
@@ -364,7 +380,7 @@ get_model_comparisons(nonres_res_inv_dist, nonres_res_inv_dist2, nonres_res_cont
 
 # printing out coefficients for policy categories on our chosen model
 
-nonres_res_sar <- nonres_res_inv_dist[[2]][5][[1]]
+nonres_res_sar <- nonres_res_inv_dist[[2]][3][[1]]
 summary(nonres_res_sar)
 data.frame(coef(nonres_res_sar)) %>% 
   rownames_to_column('term') %>% 
@@ -374,11 +390,11 @@ data.frame(coef(nonres_res_sar)) %>%
 # printing moran test.. both this & the LR in the model summary have p-values <
 # 0.05... figure out what that means again
 
-nonres_res_inv_dist[[3]][5][[1]]
+nonres_res_inv_dist[[3]][3][[1]]
 
 # printing diagnostic plots
 
-nonres_res_inv_dist[[4]][5][[1]]
+nonres_res_inv_dist[[4]][3][[1]]
 
 # log(nonres/res - 1) = log((nonres-res) / res), so exponentiating coefficients
 # yields the multiplicative increase in the difference between nonresident and
@@ -409,14 +425,7 @@ get_coef_plot(nonres_res_sar) +
 
 ```{r late_early_mod_function}
 
-# try fitting this on the raw data & see what happens with the residuals
-# (qqplot)... if residuals still look good, we can stick with using the original
-# data, but if not we can use the square root
-
-hist(usa@data$late_to_early)
-hist(sqrt(usa@data$late_to_early))
-
-# generating the models and diagnostics for the two different weights matrices
+# generating the models and diagnostics for the different weights matrices
 
 late_early_inv_dist <- make_late_early_models(weights.inv.dist)
 late_early_inv_dist2 <- make_late_early_models(weights.inv.dist2)
@@ -439,7 +448,7 @@ get_model_comparisons(late_early_inv_dist, late_early_inv_dist2, late_early_cont
 
 # printing out coefficients for policy categories on our chosen model
 
-late_early_sar <- late_early_inv_dist2[[2]][5][[1]]
+late_early_sar <- late_early_inv_dist[[2]][3][[1]]
 summary(late_early_sar)
 
 # I currently have the raw late-to-early ratios, so larger coefficients indicate
@@ -454,20 +463,112 @@ data.frame(coef(late_early_sar)) %>%
 # printing moran test.. both this & the LR in the model summary have p-values <
 # 0.05... figure out what that means again
 
-late_early_inv_dist2[[3]][5][[1]]
+late_early_inv_dist[[3]][3][[1]]
 
 # printing diagnostic plots
 
-late_early_inv_dist2[[4]][5][[1]]
+late_early_inv_dist2[[4]][3][[1]]
 
 # plotting coefficients
 
-get_coef_plot(late_early_sar) +
+get_coef_plot(late_early_sar)  +
   geom_vline(xintercept = 0,
              color = 'red',
              linetype = 'dotted') +
   labs(title = 'States with less strict surroundings tend to have significantly lower \nlate-to-early ratios')
   
+```
+
+# Significant
+
+```{r printing_sig_coefs}
+
+# I want to compare which coefficients are significant and in what direction
+
+direction_df <- get_summary_df(rate_sar) %>% 
+  filter(str_detect(term, 'within_between')) %>% 
+  mutate(variable = 'rate') %>% 
+  bind_rows(get_summary_df(ie_sar) %>% 
+  filter(str_detect(term, 'within_between')) %>% 
+  mutate(variable = 'ie')) %>% 
+  bind_rows(get_summary_df(late_early_sar) %>% 
+  filter(str_detect(term, 'within_between')) %>% 
+    mutate(variable = 'late-early')) %>% 
+  mutate(term = str_remove_all(term, 'within_between'),
+         hypothesis = case_when(str_detect(term, '^high-') ~ 'decrease',
+                                str_detect(term, '-high$') ~ 'increase')) %>% 
+  mutate(actual = ifelse(estimate > 0, 'increase', 'decrease'),
+         confirm = hypothesis == actual) %>% 
+  select(term, variable, confirm, hypothesis, actual, pr_z)
+
+# getting proportion of overall coefficients in the right direction
+
+direction_df %>% 
+  drop_na(confirm) %>% 
+  arrange(desc(confirm)) %>% 
+  pull(confirm) %>% 
+  mean()
+
+# getting proportion of significant coefficients in the right direction
+
+direction_df %>% 
+  drop_na(confirm) %>% 
+  filter(pr_z < 0.05) %>% 
+  pull(confirm) %>% 
+  mean()
+
+# of those that were right/wrong, how many came from each category... strongest
+# spillover appears to be **out** of the strict states, with less conclusive
+# effects for spillover of abortions **into** less restrictive states. how will
+# Roe and the changing landscape change that?
+
+direction_df %>% 
+  drop_na(confirm) %>% 
+  group_by(hypothesis, confirm) %>% 
+  summarise(n = n()) %>% 
+  arrange(desc(n))
 
 ```
+
+```{r display_all_coefs}
+
+# getting column names for kable output... need to do it like this so I can get
+# the names to cover multiple lines
+
+names_spaced <- c(
+  'Variable',
+  'Rate model: Change in abortions per 1k births',
+  'IE model: Multiplicative change in import-export ratio',
+  'Late-early model: Change in the square root of the late-early ratio'
+  )
+
+big_coef_df <- mutate(get_summary_df(rate_sar), dep = 'rate') %>% 
+  bind_rows(mutate(get_summary_df(ie_sar), dep = 'ie'),
+            mutate(get_summary_df(late_early_sar), dep = 'late-early')) %>% 
+  mutate(ci = ifelse(dep != 'ie',
+                     paste0('(', round(estimate-qnorm(0.975)*std_error, 3), 
+                            ', ', round(estimate+qnorm(0.975)*std_error, 3), ')'),
+                     paste0('(', round(exp(estimate-qnorm(0.975)*std_error), 3), 
+                            ', ', round(exp(estimate+qnorm(0.975)*std_error), 3), ')')),
+         estimate = ifelse(dep == 'ie', exp(estimate), estimate),
+         estimate = round(estimate, 3)) %>% 
+  mutate(estimate = ifelse(pr_z < 0.05, paste0(estimate, '*'), estimate),
+         pr_z = round(pr_z, 3),
+         estimate = paste(estimate, ci)) %>% 
+  select(term, estimate, dep) %>% 
+  pivot_wider(names_from = dep, values_from = estimate) %>% 
+  mutate(term = str_remove_all(term, 'within_between')) %>% 
+  mutate(term = str_remove_all(term, fixed('as.factor(year)')))
+
+big_coef_df %>% 
+  kable(booktabs = TRUE,
+        #format = 'latex',
+        col.names = names_spaced) %>% 
+  pack_rows('Policy category', 2, 9) %>%
+  pack_rows('Control variables', 10, 14) %>% 
+  pack_rows('Year', 15, 23) %>% 
+  column_spec(1:4, width = "10em")
+
+```
+
 

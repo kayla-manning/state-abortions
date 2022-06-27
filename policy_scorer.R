@@ -1,5 +1,5 @@
 
-# necessary packages for cleaning and getting socring data from my google sheet
+# necessary packages for cleaning and getting scoring data from my google sheet
 
 {
   library(tidyverse)
@@ -10,8 +10,7 @@
 
 # reading policies from the saved csv
 
-policy_df <- read_csv('raw-data/scraped/scraped_policies.csv') %>% 
-  select(-X1)
+policy_df <- read_csv('raw-data/scraped/scraped_policies.csv')
 
 # getting info on the different levels for each variable
 
@@ -49,7 +48,7 @@ clean <- policy_df %>%
   mutate(across(licensed_physician:parental_involv_minors,
                 function(x) ifelse(x == '', 'Enjoined', x))) %>% 
   mutate(across(licensed_physician:parental_involv_minors, 
-                function(x) replace_na(x, 0))) %>% 
+                function(x) replace_na(x, '0'))) %>% 
   mutate(fund_life_rape_incest = str_replace(fund_life_rape_incest,
                                              ' Onl$', ' Only'),
          parental_involv_minors = str_replace(parental_involv_minors,
@@ -148,7 +147,7 @@ weight_df <- dist_df %>%
 
 interstate_scores_df <- weight_df %>% 
   mutate(state2 = state.abb[match(state2, state.name)]) %>% 
-  inner_join(scores_df, by = c('state2' = 'state', 'year')) %>% 
+  inner_join(intrastate_scores_df, by = c('state2' = 'state', 'year')) %>% 
   group_by(state, year) %>% 
   mutate(weight_norm = weight / sum(weight)) %>% 
   summarise(interstate_score = sum(weight_norm * hostility_score),
