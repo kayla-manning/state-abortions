@@ -11,108 +11,8 @@ knitr::opts_chunk$set(echo = TRUE,
 
 # calling helper file that reads in all packages, data, and homemade functions
 
-source('model_helper.R')
-
-```
-
-## Neighbors and Weights
-
-```{r spatial_weights}
-
-{
-  {
-    # getting spatial data for US state boundaries & subsetting out Alaska & Hawaii
-    # (using tutorial at https://mhallwor.github.io/_pages/basics_SpatialPolygons)
-
-    usa <- raster::getData('GADM', country='USA', level=1)
-    usa <- usa[!usa$NAME_1 %in% c('Alaska', 'Hawaii'),]
-
-    # merging with data
-
-    usa <- merge(usa, nonspatial_df,
-                 by.x = 'NAME_1', by.y = 'state',
-                 duplicateGeoms = TRUE, all.x = FALSE)
-    
-    # ordering within-between categories so that the reference grouping makes sense
-    
-    usa@data$within_between <- fct_relevel(usa@data$within_between,
-                                       'low-low', 'med-low', 'high-low',
-                                       'low-med', 'med-med', 'high-med',
-                                       'low-high', 'med-high', 'high-high')
-    usa@data$within_between <- fct_relevel(usa@data$within_between,
-                                           'high-high')
-    
-  }
-
-  # using poly2nb to create a neighbors list & from that a neighbors matrix
-  # https://rspatial.org/raster/rosu/Chapter7.html
-
-  ### ******* I MAY WANT TO ADD A SNAP ARGUMENT IN THE FUTURE TO CONSIDER BOUNDARY
-  ### POINTS LESS THAN SNAP DISTANCE APART AS NEIGHBORS... STATES THAT DO NOT
-  ### SHARE BOUNDARIES ARE STILL CLOSE TO ONE ANOTHER AND HAVE REASONABLE
-  ### SPILLOVER / REGIONAL CORRELATION **********
-
-  # usa_contig <- poly2nb(usa, queen=FALSE)
-
-}
-
-# writing the nb object to a file so that I don't have to recreate it every time
-# (it takes forever) & can just read it in directly
-
-# write.nb.gal(usa_contig, 'raw-data/helper/usa_contig_nb.gal')
-usa_contig <- read.gal('raw-data/helper/usa_contig_nb.gal')
-
-# check for symmetric relationships (since if TX is a neighbor of OK, OK should
-# also be a neighbor of TX)
-
-is.symmetric.nb(usa_contig)
-
-# build binary weight matrix
-
-weights.contig.B <- nb2listw(usa_contig, style = "B")
-print(weights.contig.B)
-
-# rescaling each row of B to sum to 1
-
-weights.contig.W <- nb2listw(usa_contig)
-image(listw2mat(weights.contig.W)[,281:1],
-      axes = FALSE)
-
-```
-
-```{r dist_matrix}
-
-# creating weights based on the inverse distance
-
-inv.dist <- lapply(nbdists(usa.dist.range, coordinates(usa)),
-                   function(x) ifelse(x!=0, 1e3/(x), x))
-weights.inv.dist <- nb2listw(usa.dist.range, 
-                             glist = inv.dist, # specify weights
-                             style = "B")
-
-# note style B uses the weights specified by inv.dist, 
-# setting style = W will renormalize the weights to sum to one
-
-print(weights.inv.dist)
-image(listw2mat(weights.inv.dist)[,281:1],
-      axes = FALSE)
-
-# also created weights based on inverse distance squared, which will give a
-# greater penalty to states with larger distances (similar to the construction
-# of the interstate scores)
-
-inv.dist2 <- lapply(nbdists(usa.dist.range, coordinates(usa)),
-                   function(x) ifelse(x!=0, 1e3/(x^2), x))
-weights.inv.dist2 <- nb2listw(usa.dist.range, 
-                              glist = inv.dist2, # specify weights
-                              style = "B")
-
-# note style B uses the weights specified by inv.dist, 
-# setting style = W will renormalize the weights to sum to one
-
-print(weights.inv.dist2)
-image(listw2mat(weights.inv.dist2)[,281:1],
-      axes = FALSE)
+source('model_helper_raw_scores.R')
+# source('fit_models.R')
 
 ```
 
@@ -120,21 +20,57 @@ image(listw2mat(weights.inv.dist2)[,281:1],
 
 ```{r global_moran}
 
-# moran test on row-normalized weights for contiguous neighbors
+# moran test using the row-normalized contiguous neighbor weights, inverse
+# weighted distance weights, & distance squared weights
 
-moran.test(usa$abortion_per_1k_births,
-           listw = weights.contig.W)
+{
+  moran.mc(usa@data$abortion_per_1k_births,
+         listw = weights.contig.W,
+         nsim = 9999,
+         alternative = 'two.sided')
+  moran.mc(usa@data$abortion_per_1k_births,
+           listw = weights.inv.dist,
+           nsim = 9999,
+           alternative = 'two.sided')
+  moran.mc(usa@data$abortion_per_1k_births,
+           listw = weights.inv.dist2,
+           nsim = 9999,
+           alternative = 'two.sided')
+}
 
-# moran test using the inverse weighted distance & distance squared
+# same thing but for import-export
 
-moran.test(usa$abortion_per_1k_births,
-           listw = weights.inv.dist)
-moran.mc(usa@data$abortion_per_1k_births,
-         listw = weights.inv.dist,
-         nsim = 9999)
+{
+  moran.mc(usa@data$ie_ratio,
+         listw = weights.contig.W,
+         nsim = 9999,
+         alternative = 'two.sided')
+  moran.mc(usa@data$ie_ratio,
+           listw = weights.inv.dist,
+           nsim = 9999,
+           alternative = 'two.sided')
+  moran.mc(usa@data$ie_ratio,
+           listw = weights.inv.dist2,
+           nsim = 9999,
+           alternative = 'two.sided')
+}
 
-moran.test(usa$abortion_per_1k_births,
-           listw = weights.inv.dist2)
+# same thing but for late-early
+
+{
+  moran.mc(usa@data$late_to_early,
+         listw = weights.contig.W,
+         nsim = 9999,
+         alternative = 'two.sided')
+  moran.mc(usa@data$late_to_early,
+           listw = weights.inv.dist,
+           nsim = 9999,
+           alternative = 'two.sided')
+  moran.mc(usa@data$late_to_early,
+           listw = weights.inv.dist2,
+           nsim = 9999,
+           alternative = 'two.sided')
+}
 
 ```
 
@@ -149,20 +85,17 @@ moran.test(usa$abortion_per_1k_births,
   untransformed <- usa@data %>% 
     select(abortion_per_1k_births,
            ie_ratio,
-           nonres_res_ratio,
            late_to_early) %>% 
     pivot_longer(everything()) %>% 
     mutate(transformed = FALSE,
            transformation = case_when(name == 'abortion_per_1k_births' ~ 'none',
                                       name == 'ie_ratio' ~ 'log(x)',
-                                      name == 'nonres_res_ratio' ~ 'log(x - 1)',
-                                      name == 'late_to_early' ~ 'none')) 
+                                      name == 'late_to_early' ~ 'sqrt(x)')) 
   
   graph_df <- untransformed %>% 
     mutate(value = case_when(name == 'abortion_per_1k_births' ~ value,
                                       name == 'ie_ratio' ~ log(value),
-                                      name == 'nonres_res_ratio' ~ log(value-1),
-                                      name == 'late_to_early' ~ value),
+                                      name == 'late_to_early' ~ sqrt(value)),
            transformed = TRUE) %>% 
     bind_rows(untransformed) %>% 
     mutate(transformation = ifelse(transformed, transformation, 'untransformed')) 
@@ -170,7 +103,7 @@ moran.test(usa$abortion_per_1k_births,
   # creating a list of plots in a loop to streamline the code
   
   plots <- list()
-  dep_vars <- c('abortion_per_1k_births', 'ie_ratio', 'nonres_res_ratio', 'late_to_early')
+  dep_vars <- c('abortion_per_1k_births', 'ie_ratio', 'late_to_early')
   for (i in 1:length(dep_vars)) {
     plots[[i]] <- graph_df %>% 
       filter(name == dep_vars[i]) %>% 
@@ -184,7 +117,7 @@ moran.test(usa$abortion_per_1k_births,
   
   # printing out the plots
   
-  ggarrange(plots[[1]], plots[[2]], plots[[3]], plots[[4]]) %>% 
+  ggarrange(plots[[1]], plots[[2]], plots[[3]]) %>% 
     annotate_figure(left = textGrob('Count', rot = 90, vjust = 1),
                     bottom = textGrob('Value'),
                     top = text_grob('Dependent variables as approximately Gaussian distributions', 
@@ -213,101 +146,50 @@ usa@data %>%
 
 ## Abortion rates
 
-```{r fit_rate_models}
-
-# generating the models and diagnostics for the two different weights matrices
-
-rates_inv_dist <- make_rate_models(weights.inv.dist)
-rates_inv_dist2 <- make_rate_models(weights.inv.dist2)
-rates_contig <- make_rate_models(weights.contig.W)
-
-```
-
-```{r rate_comparisons}
-
-# creating table to compare fit of various models
-
-get_model_comparisons(rates_inv_dist, rates_inv_dist2, rates_contig)%>% 
-  kable(caption = 'Model selection for abortion rates',
-        booktabs = TRUE)
-
-```
-
 ```{r rate_sar}
 
 # printing moran test.. both this & the LR in the model summary have p-values <
 # 0.05... figure out what that means again
 
-rates_inv_dist[[3]][3][[1]]
+rates_inv_dist[[3]][6][[1]]
 
 # printing diagnostic plots
 
-rates_inv_dist[[4]][3][[1]]
+rates_inv_dist[[4]][6][[1]]
 
-# printing out coefficients for policy categories on our chosen model
+# getting model summary
 
-rate_sar <- rates_inv_dist[[2]][3][[1]]
+rate_sar <- rates_inv_dist[[2]][6][[1]]
 summary(rate_sar)
-data.frame(coef(rate_sar)) %>% 
-  rownames_to_column('term') %>% 
-  filter(str_detect(term, 'within_between')) %>% 
-  arrange(coef.rate_sar.)
+
 
 # creating the plot for the rate object
 
-get_coef_plot(rate_sar) +
-  labs(title = 'All policy categories are associated with lower abortion rates \nthan the most restricted states') +
-  geom_vline(xintercept = 0,
-             color = 'red',
-             linetype = 'dotted')
+# get_coef_plot(rate_sar) +
+#   labs(title = 'All policy categories are associated with lower abortion rates \nthan the most restricted states') +
+#   geom_vline(xintercept = 0,
+#              color = 'red',
+#              linetype = 'dotted')
 
 ```
 
 ## Import-export ratio
 
-```{r fit_ie_models}
-
-# generating the models and diagnostics for the two different weights matrices
-
-ie_inv_dist <- make_ie_models(weights.inv.dist)
-ie_inv_dist2 <- make_ie_models(weights.inv.dist2)
-ie_contig <- make_ie_models(weights.contig.W)
-
-```
-
-```{r ie_comparisons}
-
-# producing table as I did before... lowest AIC observed in SAR model with
-# inv_dist weights
-
-# producing table as I did before... lowest AIC observed in SAR model with
-# inv_dist weights
-
-get_model_comparisons(ie_inv_dist, ie_inv_dist2, ie_contig) %>% 
-  kable(caption = 'Model selection for import-export ratios',
-        booktabs = TRUE)
-
-```
-
 ```{r ie_sar}
 
 # printing out coefficients for policy categories on our chosen model
 
-ie_sar <- ie_inv_dist[[2]][3][[1]]
+ie_sar <- ie_inv_dist[[2]][6][[1]]
 summary(ie_sar)
-data.frame(coef(ie_sar)) %>% 
-  rownames_to_column('term') %>% 
-  filter(str_detect(term, 'within_between')) %>% 
-  arrange(coef.ie_sar.)
 
 # printing moran test.. both this & the LR in the model summary have p-values <
 # 0.05... figure out what that means again
 
-ie_inv_dist[[3]][3][[1]]
+ie_inv_dist[[3]][6][[1]]
 
 # printing diagnostic plots
 
-ie_inv_dist[[4]][3][[1]]
+ie_inv_dist[[4]][6][[1]]
 
 # getting coefficients ready to interpret... higher IE ratio indicates that more
 # people travel in the state and few people leave the state.... lower ratios
@@ -316,170 +198,137 @@ ie_inv_dist[[4]][3][[1]]
 # indicate that it corresponds to more people seeking abortions in neighboring
 # states relative to the state in question
 
-data.frame(coef(ie_sar)) %>% 
-  rownames_to_column('term') %>% 
-  filter(str_detect(term, 'within_between')) %>% 
-  mutate(coef.ie_sar. = exp(coef.ie_sar.)) %>% 
-  arrange(coef.ie_sar.) %>% 
-  rename(exp_coef = coef.ie_sar.)
-
-stargazer::stargazer(ie_sar)
-
-# printing list of significant coefficients
-
-get_summary_df(ie_sar) %>% 
-  filter(str_detect(term, 'within_between'))
 
 # getting coefficient plot
 
-get_summary_df(ie_sar) %>% 
-  filter(str_detect(term, 'within_between')) %>% 
-  mutate(conf.low = exp(estimate - qnorm(0.975)*std_error),
-         conf.high = exp(estimate + qnorm(0.975)*std_error),
-         estimate = exp(estimate),
-         term = str_remove_all(term, 'within_between')) %>% 
-  select(term, estimate, conf.low, conf.high) %>% 
-  ggplot(aes(estimate, fct_reorder(term, estimate))) +
-  geom_point() +
-  geom_errorbar(aes(xmin = conf.low, xmax = conf.high)) +
-  theme_minimal() +
-  labs(x = 'exp(coefficient)',
-       y = 'Policy category',
-       subtitle = 'Relative to high-high reference group') +
-  geom_vline(xintercept = 1,
-             color = 'red', 
-             linetype = 'dotted') +
-  labs(title = 'States with less strict surroundings tend to have fewer people traveling in \nand more people traveling out')
-
-```
-
-## Nonresident-resident ratio
-
-```{r nonres_mod_function}
-
-# generating the models and diagnostics for the three different weights matrices
-
-nonres_res_inv_dist <- make_nonres_res_models(weights.inv.dist)
-nonres_res_inv_dist2 <- make_nonres_res_models(weights.inv.dist2)
-nonres_res_contig <- make_nonres_res_models(weights.contig.W)
-
-```
-
-```{r nonres_res_comparisons}
-
-# producing table as I did before... lowest AIC observed in SAR model with
-# inv_dist weights
-
-get_model_comparisons(nonres_res_inv_dist, nonres_res_inv_dist2, nonres_res_contig) %>% 
-  kable(caption = 'Model selection for nonresident-to-resident ratios',
-        booktabs = TRUE)
-
-```
-
-```{r nonres_res_sar}
-
-# printing out coefficients for policy categories on our chosen model
-
-nonres_res_sar <- nonres_res_inv_dist[[2]][3][[1]]
-summary(nonres_res_sar)
-data.frame(coef(nonres_res_sar)) %>% 
-  rownames_to_column('term') %>% 
-  filter(str_detect(term, 'within_between')) %>% 
-  arrange(coef.nonres_res_sar.)
-
-# printing moran test.. both this & the LR in the model summary have p-values <
-# 0.05... figure out what that means again
-
-nonres_res_inv_dist[[3]][3][[1]]
-
-# printing diagnostic plots
-
-nonres_res_inv_dist[[4]][3][[1]]
-
-# log(nonres/res - 1) = log((nonres-res) / res), so exponentiating coefficients
-# yields the multiplicative increase in the difference between nonresident and
-# resident abortions as a ratio of resident abortions... larger values means
-# that there are relatively more out-of-state abortions & smaller values mean
-# that there are relatively fewer out-of-state abortions
-
-data.frame(coef(nonres_res_sar)) %>% 
-  rownames_to_column('term') %>% 
-  filter(str_detect(term, 'within_between')) %>% 
-  mutate(coef.nonres_res_sar. = exp(coef.nonres_res_sar.)) %>% 
-  arrange(desc(coef.nonres_res_sar.)) %>% 
-  rename(exp_coef = coef.nonres_res_sar.)
-
-# creating my plot of coefficients
-
-get_coef_plot(nonres_res_sar) +
-  geom_vline(xintercept = log(1),
-             color = 'red', 
-             linetype = 'dotted') +
-  labs(title = 'States with less strict surroundings have significantly fewer people traveling in \nand more people traveling out',
-       subtitle = 'Relative to high-high reference group')
-  
+# get_summary_df(ie_sar) %>% 
+#   filter(str_detect(term, 'within_between')) %>% 
+#   mutate(conf.low = exp(estimate - qnorm(0.975)*std_error),
+#          conf.high = exp(estimate + qnorm(0.975)*std_error),
+#          estimate = exp(estimate),
+#          term = str_remove_all(term, 'within_between')) %>% 
+#   select(term, estimate, conf.low, conf.high) %>% 
+#   ggplot(aes(estimate, fct_reorder(term, estimate))) +
+#   geom_point() +
+#   geom_errorbar(aes(xmin = conf.low, xmax = conf.high)) +
+#   theme_minimal() +
+#   labs(x = 'exp(coefficient)',
+#        y = 'Policy category',
+#        subtitle = 'Relative to high-high reference group') +
+#   geom_vline(xintercept = 1,
+#              color = 'red', 
+#              linetype = 'dotted') +
+#   labs(title = 'States with less strict surroundings tend to have fewer people traveling in \nand more people traveling out')
 
 ```
 
 ## Late-to-early ratio
 
-```{r late_early_mod_function}
-
-# generating the models and diagnostics for the different weights matrices
-
-late_early_inv_dist <- make_late_early_models(weights.inv.dist)
-late_early_inv_dist2 <- make_late_early_models(weights.inv.dist2)
-late_early_contig <- make_late_early_models(weights.contig.W)
-
-```
-
-```{r late_early_comparisons}
-
-# producing table as I did before... lowest AIC observed in SAR model with
-# inv_dist weights
-
-get_model_comparisons(late_early_inv_dist, late_early_inv_dist2, late_early_contig) %>% 
-  kable(caption = 'Model selection for late-to-early ratios',
-        booktabs = TRUE)
-
-```
-
 ```{r late_early_sar}
 
 # printing out coefficients for policy categories on our chosen model
 
-late_early_sar <- late_early_inv_dist[[2]][3][[1]]
+late_early_sar <- late_early_inv_dist[[2]][6][[1]]
 summary(late_early_sar)
-
-# I currently have the raw late-to-early ratios, so larger coefficients indicate
-# that there is more likely to be a relatively higher number of later-term
-# abortions in states like these
-
-data.frame(coef(late_early_sar)) %>% 
-  rownames_to_column('term') %>% 
-  filter(str_detect(term, 'within_between')) %>% 
-  arrange(coef.late_early_sar.)
 
 # printing moran test.. both this & the LR in the model summary have p-values <
 # 0.05... figure out what that means again
 
-late_early_inv_dist[[3]][3][[1]]
+late_early_inv_dist[[3]][6][[1]]
 
 # printing diagnostic plots
 
-late_early_inv_dist2[[4]][3][[1]]
+late_early_inv_dist2[[4]][6][[1]]
 
 # plotting coefficients
 
-get_coef_plot(late_early_sar)  +
-  geom_vline(xintercept = 0,
-             color = 'red',
-             linetype = 'dotted') +
-  labs(title = 'States with less strict surroundings tend to have significantly lower \nlate-to-early ratios')
+# get_coef_plot(late_early_sar)  +
+#   geom_vline(xintercept = 0,
+#              color = 'red',
+#              linetype = 'dotted') +
+#   labs(title = 'States with less strict surroundings tend to have significantly lower \nlate-to-early ratios')
   
 ```
 
 # Significant
+
+```{r display_all_coefs}
+
+# getting column names for kable output... need to do it like this so I can get
+# the names to cover multiple lines
+
+names_spaced <- c(
+  'Variable',
+  'Rate model: Change in abortions per 1k births',
+  'IE model: Multiplicative change in import-export ratio',
+  'Late-early model: Change in the square root of the late-early ratio'
+  )
+
+big_coef_df <- mutate(get_summary_df(rate_sar), dep = 'rate') %>% 
+  bind_rows(mutate(get_summary_df(ie_sar), dep = 'ie'),
+            mutate(get_summary_df(late_early_sar), dep = 'late-early')) %>% 
+  mutate(ci = ifelse(dep != 'ie',
+                     paste0('(', round(estimate-qnorm(0.975)*std_error, 3), 
+                            ', ', round(estimate+qnorm(0.975)*std_error, 3), ')'),
+                     paste0('(', round(exp(estimate-qnorm(0.975)*std_error), 3), 
+                            ', ', round(exp(estimate+qnorm(0.975)*std_error), 3), ')')),
+         estimate = ifelse(dep == 'ie', exp(estimate), estimate),
+         estimate = round(estimate, 3)) %>% 
+  mutate(estimate = ifelse(pr_z < 0.05, paste0(estimate, '*'), estimate),
+         pr_z = round(pr_z, 3),
+         estimate = paste(estimate, ci)) %>% 
+  select(term, estimate, dep) %>% 
+  pivot_wider(names_from = dep, values_from = estimate) %>% 
+  mutate(term = str_remove_all(term, 'within_between')) %>% 
+  mutate(term = str_remove_all(term, fixed('as.factor(year)'))) %>% 
+  mutate(term = fct_relevel(term,
+                            '(Intercept)',
+                            'interstate_score', 
+                            'intrastate_score', 
+                            'interstate_score:intrastate_score',
+                            'abortions', 'dem_2party', 'hh_income', 'pct_bachelors',
+                            'prop_hisp', 'prop_nonwhite')) %>% 
+  arrange(term)
+
+big_coef_df %>% 
+  kable(booktabs = TRUE,
+        #format = 'latex',
+        col.names = names_spaced) %>% 
+  pack_rows('Policy environment', 2, 3) %>%
+  pack_rows('Control variables', 4, 9) %>% 
+  pack_rows('Year', 10, 18) %>% 
+  column_spec(1:4, width = "10em") %>% 
+  row_spec(2, bold = T, color = "black", background = "lightyellow")
+
+
+# lots of collinearity when including interaction term
+
+car::vif(rates_inv_dist[[2]][[4]], type = 'marginal')
+car::vif(ie_inv_dist[[2]][[4]], type = 'marginal')
+car::vif(late_early_inv_dist[[2]][[4]], type = 'marginal')
+cor(usa@data$interstate_score,
+    usa@data$intrastate_score)
+
+```
+
+```{r model_comparison}
+
+# I want to also produce a grouped table with all model AICs
+
+mutate(get_model_comparisons(rates_inv_dist, rates_inv_dist2, rates_contig), var = 'rate') %>% 
+  bind_rows(mutate(get_model_comparisons(ie_inv_dist, ie_inv_dist2, ie_contig), var = 'ie')) %>% 
+  bind_rows(mutate(get_model_comparisons(late_early_inv_dist, late_early_inv_dist2, late_early_contig),
+                   var = 'late-early')) %>% 
+  group_by(var) %>% 
+  mutate(var = fct_relevel(var, 'rate', 'ie', 'late-early')) %>% 
+  arrange(var, AIC_inv_dist) %>% 
+  kable(booktabs = TRUE) %>% 
+  pack_rows('Abortion Rates (abortions per 1k live births)', 13, 18) %>% 
+  pack_rows('Import-Export Ratio', 1, 6) %>% 
+  pack_rows('Late-Early Ratio', 7, 12) %>% 
+  add_header_above(header = c(' ' = 1, 'AIC' = 3, ' ' = 2))
+
+```
 
 ```{r printing_sig_coefs}
 
@@ -530,45 +379,26 @@ direction_df %>%
 
 ```
 
-```{r display_all_coefs}
+```{r state_categories}
 
-# getting column names for kable output... need to do it like this so I can get
-# the names to cover multiple lines
-
-names_spaced <- c(
-  'Variable',
-  'Rate model: Change in abortions per 1k births',
-  'IE model: Multiplicative change in import-export ratio',
-  'Late-early model: Change in the square root of the late-early ratio'
-  )
-
-big_coef_df <- mutate(get_summary_df(rate_sar), dep = 'rate') %>% 
-  bind_rows(mutate(get_summary_df(ie_sar), dep = 'ie'),
-            mutate(get_summary_df(late_early_sar), dep = 'late-early')) %>% 
-  mutate(ci = ifelse(dep != 'ie',
-                     paste0('(', round(estimate-qnorm(0.975)*std_error, 3), 
-                            ', ', round(estimate+qnorm(0.975)*std_error, 3), ')'),
-                     paste0('(', round(exp(estimate-qnorm(0.975)*std_error), 3), 
-                            ', ', round(exp(estimate+qnorm(0.975)*std_error), 3), ')')),
-         estimate = ifelse(dep == 'ie', exp(estimate), estimate),
-         estimate = round(estimate, 3)) %>% 
-  mutate(estimate = ifelse(pr_z < 0.05, paste0(estimate, '*'), estimate),
-         pr_z = round(pr_z, 3),
-         estimate = paste(estimate, ci)) %>% 
-  select(term, estimate, dep) %>% 
-  pivot_wider(names_from = dep, values_from = estimate) %>% 
-  mutate(term = str_remove_all(term, 'within_between')) %>% 
-  mutate(term = str_remove_all(term, fixed('as.factor(year)')))
-
-big_coef_df %>% 
-  kable(booktabs = TRUE,
-        #format = 'latex',
-        col.names = names_spaced) %>% 
-  pack_rows('Policy category', 2, 9) %>%
-  pack_rows('Control variables', 10, 14) %>% 
-  pack_rows('Year', 15, 23) %>% 
-  column_spec(1:4, width = "10em")
+library(zoo)
+usa@data %>% 
+  select(NAME_1, year, within_between) %>% 
+  group_by(NAME_1, within_between) %>% 
+  mutate(same_as_previous_year = ifelse(lag(within_between) == within_between,
+                                        TRUE,
+                                        FALSE),
+         year_start = ifelse(is.na(same_as_previous_year),
+                             year, NA),
+         year_end = ifelse(is.na(lead(same_as_previous_year)),
+                                 year, NA),
+         year_start = na.locf(year_start),
+         year_end = na.locf(year_end),
+         year_range = paste(year_start, year_end, sep = '-')) %>% 
+  select(within_between, NAME_1, year_range) %>% 
+  distinct() %>% 
+  arrange(NAME_1) %>% 
+  rename(state = NAME_1)
 
 ```
-
 

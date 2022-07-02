@@ -1,5 +1,5 @@
 # using this script to load all packages, data, and functions necessary for the
-# models.Rmd script
+# models.Rmd script..... (no interaction)
 
 ###############################
 ##### SETUP (packages & data)
@@ -50,10 +50,8 @@
 {
   make_models <- function(weights_matrix, var = 'rate') {
     
-    methods <- c('category_lm', 'category_car', 'category_sar',
-                 'category_lagsar', 'category_errorsar',
-                 'raw_lm', 'raw_car', 'raw_sar',
-                 'raw_lagsar', 'raw_errorsar')
+    methods <- c('category_lm', 'category_car', 'category_sar', 
+                 'raw_lm', 'raw_car', 'raw_sar')
     
     # fitting models for each of the response variables
     
@@ -77,15 +75,15 @@
       
       # using the raw scores
       
-      raw_lm <- lm(abortion_per_1k_births ~ interstate_score * intrastate_score + pct_bachelors + 
+      raw_lm <- lm(abortion_per_1k_births ~ interstate_score + intrastate_score + pct_bachelors + 
                      prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year),
                    data = usa@data)
-      raw_car <- spautolm(abortion_per_1k_births ~ interstate_score * intrastate_score + pct_bachelors + 
+      raw_car <- spautolm(abortion_per_1k_births ~ interstate_score + intrastate_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year),
                           data = usa@data,
                           family = 'CAR',
                           listw = weights_matrix)
-      raw_sar <- spautolm(abortion_per_1k_births ~ interstate_score * intrastate_score + pct_bachelors + prop_hisp + 
+      raw_sar <- spautolm(abortion_per_1k_births ~ interstate_score + intrastate_score + pct_bachelors + prop_hisp + 
                             prop_nonwhite + hh_income + dem_2party + as.factor(year),
                           data = usa@data,
                           family = 'SAR',
@@ -113,15 +111,15 @@
       
       # using the raw scores
       
-      raw_lm <- lm(log(ie_ratio) ~ interstate_score * intrastate_score + pct_bachelors + 
+      raw_lm <- lm(log(ie_ratio) ~ interstate_score + intrastate_score + pct_bachelors + 
                      prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
                    data = usa@data)
-      raw_car <- spautolm(log(ie_ratio) ~ interstate_score * intrastate_score + pct_bachelors + 
+      raw_car <- spautolm(log(ie_ratio) ~ interstate_score + intrastate_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
                           data = usa@data,
                           family = 'CAR',
                           listw = weights_matrix)
-      raw_sar <- spautolm(log(ie_ratio) ~ interstate_score * intrastate_score + pct_bachelors + 
+      raw_sar <- spautolm(log(ie_ratio) ~ interstate_score + intrastate_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
                           data = usa@data,
                           family = 'SAR',
@@ -149,15 +147,15 @@
       
       # using the raw scores
       
-      raw_lm <- lm(sqrt(late_to_early) ~ interstate_score * intrastate_score + pct_bachelors + 
+      raw_lm <- lm(sqrt(late_to_early) ~ interstate_score + intrastate_score + pct_bachelors + 
                      prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
                    data = usa@data)
-      raw_car <- spautolm(sqrt(late_to_early) ~ interstate_score * intrastate_score + pct_bachelors + 
+      raw_car <- spautolm(sqrt(late_to_early) ~ interstate_score + intrastate_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
                           data = usa@data,
                           family = 'CAR',
                           listw = weights_matrix)
-      raw_sar <- spautolm(sqrt(late_to_early) ~ interstate_score * intrastate_score + pct_bachelors + 
+      raw_sar <- spautolm(sqrt(late_to_early) ~ interstate_score + intrastate_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
                           data = usa@data,
                           family = 'SAR',
