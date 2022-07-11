@@ -47,7 +47,7 @@ knitr::opts_chunk$set(message = FALSE,
 {
   # reading in gestational data that I scraped
 
-  gestation <- read_csv('raw-data/scraped/gestational_combined.csv') %>% 
+  gestation <- read_csv('../raw-data/scraped/gestational_combined.csv') %>% 
     select(-X1) %>% distinct()
   
   # looping through the different excel sheets to get the abortion count data
@@ -55,7 +55,7 @@ knitr::opts_chunk$set(message = FALSE,
   {
     abortion_counts <- tibble()
     for (y in 2010:2019) {
-      storage <- read_excel('raw-data/downloads/abortions_2010-2019.xls', 
+      storage <- read_excel('../raw-data/downloads/abortions_2010-2019.xls', 
                             skip = 1, sheet = as.character(y)) %>% 
         select(-1) %>% 
         clean_names() %>% 
@@ -68,10 +68,10 @@ knitr::opts_chunk$set(message = FALSE,
   
   # reading in the birth & policy data
   
-  births <- read.delim('raw-data/downloads/births_2007-2020.txt') %>% 
+  births <- read.delim('../raw-data/downloads/births_2007-2020.txt') %>% 
     clean_names() %>% 
     select(-c(notes, state_code, year_code))
-  policies <- read_csv('raw-data/clean_policies.csv')
+  policies <- read_csv('../raw-data/clean_policies.csv')
 }
 
 ```
@@ -596,10 +596,10 @@ map_policy_df %>%
   ggplot() +
   geom_polygon(aes(long, lat, group=group, fill = intrastate_score),
                color = 'black') +
-  scale_fill_gradient2(high = 'red') +
+  scale_fill_gradient2(high = 'red3') +
   coord_fixed() +
-  facet_wrap(~year, nrow = 2)+
-  labs(title = 'Intrastate scores for 2010 and 2019') +
+  facet_wrap(~year)+
+  labs(title = 'Within-state scores for 2010 and 2019') +
   theme(panel.background = element_blank(),
         axis.text = element_blank(),
         axis.line = element_blank(),

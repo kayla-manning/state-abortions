@@ -164,7 +164,7 @@
   # putting states in categories similar to Kaufman et al.
   
   category_placements <- policy_scores %>% 
-    pivot_longer(intrastate_score:interstate_score) %>% 
+    pivot_longer(within_score:surrounding_score) %>% 
     group_by(name) %>% 
     mutate(first_cutoff = quantile(value, 1/3),
            second_cutoff = quantile(value, 2/3)) %>% 
@@ -176,12 +176,12 @@
     filter(placement) %>% 
     select(-placement) %>% 
     pivot_wider(names_from = name, values_from = category) %>% 
-    mutate(within_between = paste(intrastate_score, interstate_score, sep = '-'),
+    mutate(within_between = paste(within_score, surrounding_score, sep = '-'),
            within_between = fct_relevel(within_between,
                                         levels = c('low-low', 'low-med', 'low-high',
                                                    'med-low', 'med-med', 'med-high',
                                                    'high-low', 'high-med', 'high-high'))) %>% 
-    select(-c(intrastate_score, interstate_score))
+    select(-c(within_score, surrounding_score))
 }
 
 ###############################

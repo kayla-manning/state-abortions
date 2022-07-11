@@ -299,9 +299,9 @@ missing_balance_check %>%
 options(scipen = 999)
 missing_balance_check %>% 
   pivot_wider(names_from = nonreport, values_from = average) %>% 
-  mutate(pvalue = c(tidy(aov(intrastate_score ~ nonreport, 
+  mutate(pvalue = c(tidy(aov(within_score ~ nonreport, 
                              data = data_by_missingness))$p.value[1],
-                    tidy(aov(interstate_score ~ nonreport, 
+                    tidy(aov(surrounding_score ~ nonreport, 
                              data = data_by_missingness))$p.value[1],
                     tidy(aov(dem_2party ~ nonreport, 
                              data = data_by_missingness))$p.value[1],
@@ -385,13 +385,13 @@ policies %>%
 # want to take a look at the overall distributions
 
 combined %>% 
-  ggplot(aes(intrastate_score)) +
+  ggplot(aes(within_score)) +
   geom_histogram() +
   theme_minimal() +
   labs(title = 'Within-state policy scores')
 
 combined %>% 
-  ggplot(aes(interstate_score)) +
+  ggplot(aes(surrounding_score)) +
   geom_histogram() +
   theme_minimal() +
   labs(title = 'Interstate policy scores')
@@ -403,7 +403,7 @@ combined %>%
 # getting a table that has the cutoffs
 
 category_cutoffs <- combined %>% 
-  pivot_longer(intrastate_score:interstate_score) %>% 
+  pivot_longer(within_score:surrounding_score) %>% 
   group_by(name) %>% 
   mutate(min = min(value),
          first_cutoff = quantile(value, 1/3),
@@ -424,25 +424,25 @@ category_cutoffs %>%
 # score)
 {
   combined %>% 
-  pivot_longer(intrastate_score:interstate_score) %>% 
+  pivot_longer(within_score:surrounding_score) %>% 
   ggplot() +
   geom_histogram(aes(value)) +
   facet_wrap(~name) +
-  geom_vline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
-                    name == 'intrastate_score'),
-             aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'intrastate_score']),
+  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                    name == 'within_score'),
+             aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'within_score']),
              color = 'red') +
-  geom_vline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
-                    name == 'intrastate_score'),
-             aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'intrastate_score']),
+  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                    name == 'within_score'),
+             aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'within_score']),
              color = 'red') +
-  geom_vline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
-                    name == 'interstate_score'),
-             aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'interstate_score']),
+  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                    name == 'surrounding_score'),
+             aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'surrounding_score']),
              color = 'red')+
-  geom_vline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
-                    name == 'interstate_score'),
-             aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'interstate_score']),
+  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                    name == 'surrounding_score'),
+             aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'surrounding_score']),
              color = 'red') +
   theme_minimal() +
   labs(title = 'Cutoffs for policy score categories',
@@ -452,7 +452,7 @@ category_cutoffs %>%
 # visualizing on 2d plot (scatterplot with intrastate on x and interstate on y)
 {
   combined %>% 
-    pivot_longer(intrastate_score:interstate_score) %>% 
+    pivot_longer(within_score:surrounding_score) %>% 
     group_by(name) %>% 
     mutate(first_cutoff = quantile(value, 1/3),
            second_cutoff = quantile(value, 2/3)) %>% 
@@ -464,34 +464,34 @@ category_cutoffs %>%
     mutate(score_type = name) %>% 
     pivot_wider(names_from = name, values_from = level) %>% 
     pivot_wider(names_from = score_type, values_from = value, names_prefix = 'score') %>% 
-    mutate(across(c(interstate_score, scoreinterstate_score),
+    mutate(across(c(surrounding_score, scoresurrounding_score),
                   function(x) na.locf(x, fromLast = TRUE))) %>% 
-    mutate(across(c(intrastate_score, scoreintrastate_score),
+    mutate(across(c(within_score, scorewithin_score),
                   function(x) na.locf(x))) %>% 
-    mutate(within_between = paste(intrastate_score, interstate_score, sep = '-')) %>% 
-    select(-c(intrastate_score, interstate_score)) %>% 
-    rename(interstate_score = scoreinterstate_score,
-           intrastate_score = scoreintrastate_score) %>% 
-    ggplot(aes(intrastate_score, interstate_score, color = fct_relevel(within_between,
+    mutate(within_between = paste(within_score, surrounding_score, sep = '-')) %>% 
+    select(-c(within_score, surrounding_score)) %>% 
+    rename(surrounding_score = scoresurrounding_score,
+           within_score = scorewithin_score) %>% 
+    ggplot(aes(within_score, surrounding_score, color = fct_relevel(within_between,
                                         levels = c('low-low', 'low-med', 'low-high',
                                                    'med-low', 'med-med', 'med-high',
                                                    'high-low', 'high-med', 'high-high')))) +
     geom_point() +
-    geom_vline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
-                      name == 'intrastate_score'),
-               aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'intrastate_score']),
+    geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                      name == 'within_score'),
+               aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'within_score']),
                color = 'red') +
-    geom_vline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
-                      name == 'intrastate_score'),
-               aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'intrastate_score']),
+    geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                      name == 'within_score'),
+               aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'within_score']),
                color = 'red') +
-    geom_hline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
-                      name == 'interstate_score'),
-               aes(yintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'interstate_score']),
+    geom_hline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                      name == 'surrounding_score'),
+               aes(yintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'surrounding_score']),
                color = 'red')+
-    geom_hline(data = filter(pivot_longer(combined, intrastate_score:interstate_score),
-                      name == 'interstate_score'),
-               aes(yintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'interstate_score']),
+    geom_hline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                      name == 'surrounding_score'),
+               aes(yintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'surrounding_score']),
                color = 'red') +
     theme_minimal() +
     labs(title = 'Cutoffs for policy score categories',

@@ -20,11 +20,18 @@
     library(knitr)
     library(kableExtra)
     library(janitor)
+    library(broom)
   }
   
-  # data
+  # data (getting income in 1000s & standardizing all quantitative dependent
+  # variables so I can interpret as increase/decrease in 1 std. dev)
   
-  combined <- read_csv('raw-data/combined_data.csv') %>% 
+  standardize <- function(x) {(x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)}
+  nonspatial_df <- read_csv('raw-data/combined_data.csv') %>% 
+    mutate(hh_income = hh_income / 1000) %>% 
+    mutate(across(c(within_score, surrounding_score, hh_income, pct_bachelors, 
+                    prop_hisp, prop_nonwhite, hh_income, dem_2party, total_population), 
+                  standardize)) %>% 
     inner_join(
       read.delim('https://www2.census.gov/geo/docs/reference/cenpop2020/CenPop2020_Mean_ST.txt') %>% 
         separate(STATEFP.STNAME.POPULATION.LATITUDE.LONGITUDE, sep = ',',
@@ -34,10 +41,41 @@
   
   # getting df that drops observations with NA in predictors/outcomes
   
-  nonspatial_df <- combined %>% 
-    drop_na(abortions, births, intrastate_score, interstate_score,
+  nonspatial_df <- nonspatial_df %>%
+    drop_na(abortions, births, within_score, surrounding_score,
             pct_bachelors, total_population, prop_hisp, prop_nonwhite,
             hh_income, dem_2party)
+  
+  # joining nonspatial data with spatial data
+  {
+    # getting spatial data for US state boundaries & subsetting out Alaska & Hawaii
+    # (using tutorial at https://mhallwor.github.io/_pages/basics_SpatialPolygons)
+    
+    usa <- raster::getData('GADM', country='USA', level=1)
+    usa <- usa[!usa$NAME_1 %in% c('Alaska', 'Hawaii'),]
+    
+    # merging with data
+    
+    usa <- merge(usa, nonspatial_df,
+                 by.x = 'NAME_1', by.y = 'state',
+                 duplicateGeoms = TRUE, all.x = FALSE)
+    
+    # ordering within-between categories so that the reference grouping makes sense
+    
+    usa@data$within_between <- fct_relevel(usa@data$within_between,
+                                           'low-low', 'med-low', 'high-low',
+                                           'low-med', 'med-med', 'high-med',
+                                           'low-high', 'med-high', 'high-high')
+    usa@data$within_between <- fct_relevel(usa@data$within_between,
+                                           'high-high')
+    
+    }
+  
+  # I call this within a few of my functions
+  
+  methods <- c('category_lm', 'category_car', 'category_errorsar', 'category_lagsar',
+               'raw_lm', 'raw_car', 'raw_errorsar', 'raw_lagsar')
+               
 }
 
 ###############################
@@ -50,127 +88,92 @@
 {
   make_models <- function(weights_matrix, var = 'rate') {
     
-    methods <- c('category_lm', 'category_car', 'category_sar',
-                 'category_lagsar', 'category_errorsar',
-                 'raw_lm', 'raw_car', 'raw_sar',
-                 'raw_lagsar', 'raw_errorsar')
-    
     # fitting models for each of the response variables
     
     if (var == 'rate') {
       
-      # using the policy categories
-      
-      category_lm <- lm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                          prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                        data = usa@data)
-      category_car <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                                 prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                               data = usa@data,
-                               family = 'CAR',
-                               listw = weights_matrix)
-      category_sar <- spautolm(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                                 prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                               data = usa@data,
-                               family = 'SAR',
-                               listw = weights_matrix)
-      
-      # using the raw scores
-      
-      raw_lm <- lm(abortion_per_1k_births ~ interstate_score * intrastate_score + pct_bachelors + 
-                     prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                   data = usa@data)
-      raw_car <- spautolm(abortion_per_1k_births ~ interstate_score * intrastate_score + pct_bachelors + 
-                            prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                          data = usa@data,
-                          family = 'CAR',
-                          listw = weights_matrix)
-      raw_sar <- spautolm(abortion_per_1k_births ~ interstate_score * intrastate_score + pct_bachelors + prop_hisp + 
-                            prop_nonwhite + hh_income + dem_2party + as.factor(year),
-                          data = usa@data,
-                          family = 'SAR',
-                          listw = weights_matrix)
+      category_f <- as.formula(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
+                        prop_nonwhite + hh_income + dem_2party + as.factor(year))
+      raw_f <- as.formula(abortion_per_1k_births ~ surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + 
+                            as.factor(year))
       
     }
     
     if (var == 'ie') {
       
-      # using the policy categories
-      
-      category_lm <- lm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                          prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
-                        data = usa@data)
-      category_car <- spautolm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                                 prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
-                               data = usa@data,
-                               family = 'CAR',
-                               listw = weights_matrix)
-      category_sar <- spautolm(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                                 prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
-                               data = usa@data,
-                               family = 'SAR',
-                               listw = weights_matrix)
-      
-      # using the raw scores
-      
-      raw_lm <- lm(log(ie_ratio) ~ interstate_score * intrastate_score + pct_bachelors + 
-                     prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
-                   data = usa@data)
-      raw_car <- spautolm(log(ie_ratio) ~ interstate_score * intrastate_score + pct_bachelors + 
-                            prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
-                          data = usa@data,
-                          family = 'CAR',
-                          listw = weights_matrix)
-      raw_sar <- spautolm(log(ie_ratio) ~ interstate_score * intrastate_score + pct_bachelors + 
-                            prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
-                          data = usa@data,
-                          family = 'SAR',
-                          listw = weights_matrix)
+      category_f <- as.formula(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
+                                 prop_nonwhite + hh_income + dem_2party + as.factor(year) + 
+                                 abortions)
+      raw_f <- as.formula(log(ie_ratio) ~ surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + 
+                            abortions)
       
     }
     
     if (var == 'late_early') {
       
+      category_f <- as.formula(sqrt(late_to_early) ~ within_between + pct_bachelors + prop_hisp + 
+                                 prop_nonwhite + hh_income + dem_2party + as.factor(year) + 
+                                 abortions)
+      raw_f <- as.formula(sqrt(late_to_early) ~ surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + 
+                            abortions)
+      
+    }
+    
+    # fitting models
+    
+    {
       # using the policy categories
       
-      category_lm <- lm(sqrt(late_to_early) ~ within_between + pct_bachelors + prop_hisp + 
-                          prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
-                        data = usa@data)
-      category_car <- spautolm(sqrt(late_to_early) ~ within_between + pct_bachelors + prop_hisp + 
-                                 prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
+      category_lm <- lm(category_f, data = usa@data)
+      category_car <- spautolm(category_f,
                                data = usa@data,
                                family = 'CAR',
                                listw = weights_matrix)
-      category_sar <- spautolm(sqrt(late_to_early) ~ within_between + pct_bachelors + prop_hisp + 
-                                 prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
-                               data = usa@data,
-                               family = 'SAR',
-                               listw = weights_matrix)
+      category_errorsar <- errorsarlm(category_f,
+                                      data = usa@data,
+                                      listw = weights_matrix)
+      category_lagsar <- lagsarlm(category_f,
+                                  data = usa@data,
+                                  listw = weights_matrix,
+                                  tol.solve=1.0e-30)
+      # category_sma <- spautolm(category_f,
+      #                          data = usa@data,
+      #                          family = 'SMA',
+      #                          listw = weights_matrix,
+      #                          tol.solve = 1.0e-50)
       
       # using the raw scores
       
-      raw_lm <- lm(sqrt(late_to_early) ~ interstate_score * intrastate_score + pct_bachelors + 
-                     prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
-                   data = usa@data)
-      raw_car <- spautolm(sqrt(late_to_early) ~ interstate_score * intrastate_score + pct_bachelors + 
-                            prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
+      raw_lm <- lm(raw_f, data = usa@data)
+      raw_car <- spautolm(raw_f,
                           data = usa@data,
                           family = 'CAR',
                           listw = weights_matrix)
-      raw_sar <- spautolm(sqrt(late_to_early) ~ interstate_score * intrastate_score + pct_bachelors + 
-                            prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + abortions,
-                          data = usa@data,
-                          family = 'SAR',
-                          listw = weights_matrix)
-      
+      raw_errorsar <- errorsarlm(raw_f,
+                                 data = usa@data,
+                                 listw = weights_matrix)
+      raw_lagsar <- lagsarlm(raw_f,
+                             data = usa@data,
+                             listw = weights_matrix,
+                             tol.solve=1.0e-30)
+      # raw_sma <- spautolm(raw_f,
+      #                     data = usa@data,
+      #                     family = 'SMA',
+      #                     listw = weights_matrix,
+      #                     tol.solve=1.0e-50)
     }
     
     # creating lists to store everything
     
-    models <- list(category_lm, category_car, category_sar,
-                   raw_lm, raw_car, raw_sar)
-    morans <- vector('list', length = length(models))
-    plots <- vector('list', length = length(models))
+    {
+      models <- list(category_lm, category_car, category_errorsar, category_lagsar,
+                     raw_lm, raw_car, raw_errorsar, raw_lagsar)
+      morans <- vector('list', length = length(models))
+      plots <- vector('list', length = length(models))
+    }
     
     for (i in 1:length(models)) {
       
@@ -225,6 +228,7 @@
     # I want to return the methods, models, moran tests, and diagnostic plots
     
     return_values <- list(methods, models, morans, plots)
+    print(paste('done with', var))
     return(return_values)
     
   }
@@ -247,8 +251,6 @@
   # getting metrics for a specific model list
   
   metrics <- c('AIC', 'logLik', 'lambda', 'lambda se')
-  methods <- c('category_lm', 'category_car', 'category_sar', 
-               'raw_lm', 'raw_car', 'raw_sar')
   get_metrics_table <- function(model_list) {
     tibble(method = rep(methods, each = length(metrics)),
            metric = rep(metrics, times = length(methods)),
@@ -308,6 +310,65 @@
            subtitle = 'Relative to high-high reference group')
   }
 }
-sqrt(late_to_early) ~ interstate_score^2 * intrastate_score + 
-  pct_bachelors + prop_hisp + prop_nonwhite + hh_income + dem_2party + 
-  abortions + as.factor(year)
+
+# trying out nlme model... jittering lat/long so that the model will fit
+
+usa@data$latitude <- jitter(usa@data$latitude)
+usa@data$longitude <- jitter(usa@data$longitude)
+test <- lme(log(ie_ratio) ~ surrounding_score * within_score + pct_bachelors + 
+            prop_hisp + prop_nonwhite + hh_income + dem_2party + abortions,
+          data = usa@data,
+          #correlation = corGaus(1, form = ~ latitude + longitude|year),
+          random = ~ longitude + latitude | year)
+summary(test)
+test2gaus <- update(test, 
+                    correlation = corGaus(form = ~ longitude + latitude | year),
+                    control = lmeControl(opt = "optim"))
+summary(test2)
+AIC(test2)
+
+# note that contiguous neighbors are much less significant... is that the most
+# important relationship?
+
+moran.mc(residuals(test2), 
+         weights.contig.W, 
+         nsim = 999, 
+         alternative = 'two.sided')
+
+# doing the same thing with different correlation structure
+
+test2exp <- update(test, 
+                   correlation = corExp(form = ~ longitude + latitude | year),
+                   control = lmeControl(opt = "optim"))
+AIC(test2exp)
+
+test2lin <- update(test, 
+                   correlation = corLin(form = ~ longitude + latitude | year),
+                   control = lmeControl(opt = "optim"))
+AIC(test2lin)
+
+test2ratio <- update(test, 
+                   correlation = corRatio(form = ~ longitude + latitude | year),
+                   control = lmeControl(opt = "optim"))
+AIC(test2ratio)
+
+test2sphere <- update(test, 
+                     correlation = corSpher(form = ~ longitude + latitude | year),
+                     control = lmeControl(opt = "optim"))
+AIC(test2sphere)
+
+test2car <- update(test, 
+                    correlation = corCAR1(form = ~ longitude + latitude | year),
+                    control = lmeControl(opt = "optim"))
+AIC(test2car)
+
+test2compsymm <- update(test, 
+                   correlation = corCompSymm(form = ~ longitude + latitude | year),
+                   control = lmeControl(opt = "optim"))
+AIC(test2compsymm)
+
+test2ar1 <- update(test,
+                   correlation = corAR1(form = ~ longitude + latitude | year))
+AIC(test2ar1)
+
+c('none', 'gaus', 'exp', 'lin', 'ratio', 'spher', 'symm', 'compsymm')

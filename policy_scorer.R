@@ -74,7 +74,7 @@ clean_policies %>%
 # now I want to use the score key alongside the policy_df to calculate a
 # hostility score for each state... 
 
-intrastate_scores_df <- clean %>% 
+within_scores_df <- clean %>% 
   pivot_longer(licensed_physician:parental_involv_minors, 
                names_to = 'policy', values_to = 'level') %>% 
   left_join(score_key, by = c('policy', 'level')) %>% 
@@ -87,14 +87,14 @@ intrastate_scores_df <- clean %>%
 
 # throwing it up on a graph so I can view change over time
 
-intrastate_scores_df %>% 
+within_scores_df %>% 
   ggplot(aes(year, hostility_score)) +
   geom_line() +
   facet_wrap(~state)
 
 # seeing which states have seen the largest magnitude of change over the years
 
-intrastate_scores_df %>% 
+within_scores_df %>% 
   group_by(state) %>% 
   mutate(annual_chg = hostility_score - lag(hostility_score)) %>% 
   summarise(abs_chg = sum(abs(annual_chg), na.rm = TRUE)) %>% 
@@ -145,35 +145,35 @@ weight_df <- dist_df %>%
 # score across all 50 states for each state & then normalizing... making sure
 # weights sum to 1 for each state/year pairing
 
-interstate_scores_df <- weight_df %>% 
+surrounding_scores_df <- weight_df %>% 
   mutate(state2 = state.abb[match(state2, state.name)]) %>% 
-  inner_join(intrastate_scores_df, by = c('state2' = 'state', 'year')) %>% 
+  inner_join(within_scores_df, by = c('state2' = 'state', 'year')) %>% 
   group_by(state, year) %>% 
   mutate(weight_norm = weight / sum(weight)) %>% 
-  summarise(interstate_score = sum(weight_norm * hostility_score),
+  summarise(surrounding_score = sum(weight_norm * hostility_score),
             .groups = 'drop') 
 # %>%
-#   mutate(interstate_score = (interstate_score - mean(interstate_score)) /
-#            sd(interstate_score))
+#   mutate(surrounding_score = (surrounding_score - mean(surrounding_score)) /
+#            sd(surrounding_score))
 
 # combining all scores
 
-all_scores <- intrastate_scores_df %>% 
+all_scores <- within_scores_df %>% 
   mutate(state = state.name[match(state, state.abb)]) %>% 
-  inner_join(interstate_scores_df, by = c('state', 'year')) %>% 
-  rename(intrastate_score = hostility_score)
+  inner_join(surrounding_scores_df, by = c('state', 'year')) %>% 
+  rename(within_score = hostility_score)
 
 # seeing the distribution of scores... I think it makes sense that intrastate is
 # more symmetric/bell-shaped since it's a distribution of weighted averages
 
 all_scores %>% 
-  pivot_longer(intrastate_score:interstate_score) %>% 
+  pivot_longer(within_score:surrounding_score) %>% 
   ggplot(aes(value)) +
   geom_histogram() +
   facet_wrap(~name, scales = 'free')
 
 all_scores %>% 
-  filter(is.na(interstate_score))
+  filter(is.na(surrounding_score))
 
 # saving this df
 

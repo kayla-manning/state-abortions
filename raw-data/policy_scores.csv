@@ -1,4 +1,4 @@
-state,year,intrastate_score,interstate_score
+state,year,within_score,surrounding_score
 Oklahoma,2016,11.583333333333334,7.472912281258596
 Oklahoma,2017,11.583333333333334,7.478977412401624
 Oklahoma,2018,11.583333333333334,7.919485200069881

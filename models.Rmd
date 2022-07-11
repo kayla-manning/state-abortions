@@ -11,8 +11,19 @@ knitr::opts_chunk$set(echo = TRUE,
 
 # calling helper file that reads in all packages, data, and homemade functions
 
-source('model_helper_raw_scores.R')
+source('model_helper.R')
 # source('fit_models.R')
+
+# loading packages & map data here since that's not specifically for modeling &
+# this may move to another script eventually
+
+{
+  library(maps)
+  states <- map_data('state')
+  map_df <- usa@data %>% 
+    mutate(NAME_1 = str_to_lower(NAME_1)) %>% 
+    inner_join(states, by = c('NAME_1' = 'region'))
+}
 
 ```
 
@@ -20,57 +31,52 @@ source('model_helper_raw_scores.R')
 
 ```{r global_moran}
 
-# moran test using the row-normalized contiguous neighbor weights, inverse
-# weighted distance weights, & distance squared weights
+# creating a list object to store moran tests in
 
 {
-  moran.mc(usa@data$abortion_per_1k_births,
-         listw = weights.contig.W,
-         nsim = 9999,
-         alternative = 'two.sided')
-  moran.mc(usa@data$abortion_per_1k_births,
-           listw = weights.inv.dist,
-           nsim = 9999,
-           alternative = 'two.sided')
-  moran.mc(usa@data$abortion_per_1k_births,
-           listw = weights.inv.dist2,
-           nsim = 9999,
-           alternative = 'two.sided')
+  weights_list <- list(weights.contig.W, weights.inv.dist, weights.inv.dist2)
+  outcome_list <- list(usa@data$abortion_per_1k_births,
+                       usa@data$ie_ratio,
+                       usa@data$late_to_early)
+  moran_list <- list()
+  i <- 1
+  
+  # iterating through and storing as a list
+  for (outcome in outcome_list) {
+    for (weight in weights_list) {
+      moran_list[[i]] <- moran.mc(outcome,
+                                  listw = weight,
+                                  nsim = 9999,
+                                  alternative = 'two.sided')
+      i <- i + 1
+    }
+  }
 }
 
-# same thing but for import-export
 
-{
-  moran.mc(usa@data$ie_ratio,
-         listw = weights.contig.W,
-         nsim = 9999,
-         alternative = 'two.sided')
-  moran.mc(usa@data$ie_ratio,
-           listw = weights.inv.dist,
-           nsim = 9999,
-           alternative = 'two.sided')
-  moran.mc(usa@data$ie_ratio,
-           listw = weights.inv.dist2,
-           nsim = 9999,
-           alternative = 'two.sided')
-}
+do.call(rbind, lapply(moran_list, tidy)) %>% 
+  mutate(var = rep(c('rate', 'ie', 'late_early'), each = 3),
+         neighbors = rep(c('contig', 'invdist', 'invdist2'), times = 3)) %>% 
+  select(neighbors, statistic, p.value) %>% 
+  kable(booktabs = TRUE,
+        col.names = c('Neighborhoods', 'I-statistic', 'p-value'),
+        caption = "Moran's I-test on outcome variables") %>% 
+  pack_rows('Abortion rates', 1, 3) %>% 
+  pack_rows('Import-export ratio', 4, 6) %>% 
+  pack_rows('Late-early ratio', 7, 9)
 
-# same thing but for late-early
+# doing the same thing but with the model residuals
 
-{
-  moran.mc(usa@data$late_to_early,
-         listw = weights.contig.W,
-         nsim = 9999,
-         alternative = 'two.sided')
-  moran.mc(usa@data$late_to_early,
-           listw = weights.inv.dist,
-           nsim = 9999,
-           alternative = 'two.sided')
-  moran.mc(usa@data$late_to_early,
-           listw = weights.inv.dist2,
-           nsim = 9999,
-           alternative = 'two.sided')
-}
+residual_morans <- lapply(list(rate_sar, ie_sar, late_early_sar), 
+                          function (x) moran.mc(residuals(x), 
+                                                weights.inv.dist,
+                                                alternative = 'two.sided',
+                                                nsim = 9999))
+do.call(rbind, lapply(residual_morans, tidy)) %>% 
+  mutate(var = c('rate', 'ie', 'late_early')) %>% 
+  select(var, statistic, p.value) %>% 
+  kable(booktabs = TRUE,
+        caption = "Moran's I-test on SAR model residuals")
 
 ```
 
@@ -144,6 +150,213 @@ usa@data %>%
 
 ```
 
+```{r maps}
+
+# producing 2010 vs 2019 plots for each of our 3 response variables
+
+p1 <- map_df %>% 
+  filter(year %in% c(2010, 2019)) %>% 
+  ggplot() +
+  geom_polygon(aes(long, lat, group = group, fill = abortion_per_1k_births),
+               color = 'black') +
+  scale_fill_gradient2(high = 'red3') +
+  coord_fixed() +
+  facet_wrap(~year) +
+  labs(title = 'Abortions per 1k births',
+       fill = '') +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+# IE ratio
+
+p2 <- map_df %>% 
+  filter(year %in% c(2010, 2019)) %>% 
+  ggplot() +
+  geom_polygon(aes(long, lat, group = group, fill = ie_ratio),
+               color = 'black') +
+  scale_fill_gradient2(high = 'red3') +
+  coord_fixed() +
+  facet_wrap(~year) +
+  labs(title = 'Import-export ratio',
+       fill = '') +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+# late-early ratio
+
+p3 <- map_df %>% 
+  filter(year %in% c(2010, 2019)) %>% 
+  ggplot() +
+  geom_polygon(aes(long, lat, group = group, fill = late_to_early),
+               color = 'black') +
+  scale_fill_gradient2(high = 'red3') +
+  coord_fixed() +
+  facet_wrap(~year) +
+  labs(title = 'Late-early ratio',
+       fill = '') +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+# putting plots together
+
+ggarrange(p1, p2, p3, nrow = 3) %>% 
+  annotate_figure(top = text_grob('Spatial structure in outcome variables', 
+                                  size = 14))
+
+```
+
+## Examining models
+
+```{r analyzing_spatial dependence}
+
+# lagrange multplier diagnostics (score tests) for spatial dependence suggest
+# that there is not lagged spatial dependence, but there is in the errors
+
+lm.LMtests(rates_inv_dist[[2]][6][[1]], 
+           listw=weights.inv.dist, 
+           test="all")
+
+# same for IE (not lagged dependence)
+
+lm.LMtests(ie_inv_dist[[2]][6][[1]], 
+           listw=weights.inv.dist, 
+           test="all")
+
+# robust regression finds insignificant lag, but everything else is significant
+
+lm.LMtests(late_early_inv_dist[[2]][6][[1]], 
+           listw=weights.inv.dist, 
+           test="all")
+
+
+```
+
+```{r model_comparison}
+
+# getting df ready for model comparison
+
+comparison_df <- mutate(get_model_comparisons(rates_inv_dist, rates_inv_dist2, rates_contig), var = 'rate') %>% 
+  bind_rows(mutate(get_model_comparisons(ie_inv_dist, ie_inv_dist2, ie_contig), var = 'ie')) %>% 
+  bind_rows(mutate(get_model_comparisons(late_early_inv_dist, late_early_inv_dist2, late_early_contig),
+                   var = 'late-early')) %>% 
+  mutate(var = fct_relevel(var, 'rate', 'ie', 'late-early')) %>% 
+  arrange(var, AIC_inv_dist)
+
+# producing a table with only the raw models
+
+{
+  comparison_df %>% 
+    filter(str_detect(method, 'raw')) %>% 
+    select(-c(var, best_weights)) %>% 
+    kable(booktabs = TRUE,
+          col.names = c('Method', 'Inverse distance', 
+                        'Inverse distance squared',
+                        'Contiguous')) %>% 
+    pack_rows('Abortion Rates (abortions per 1k live births)', 1, 5) %>% 
+    pack_rows('Import-Export Ratio', 6, 10) %>% 
+    pack_rows('Late-Early Ratio', 11, 15) %>% 
+    add_header_above(header = c(' ' = 1, 'AIC for neighborhood specification' = 3)) %>% 
+    row_spec(c(1, 6, 11), bold = T, color = "black", background = "lightyellow")
+}
+
+# I want to also produce a grouped table with all model AICs
+
+comparison_df  %>% 
+  select(-c(var, best_weights)) %>% 
+  kable(booktabs = TRUE,
+        col.names = c('Method', 'Inverse distance', 
+                      'Inverse distance squared',
+                      'Contiguous')) %>% 
+  pack_rows('Abortion Rates (abortions per 1k live births)', 1, 8) %>% 
+  pack_rows('Import-Export Ratio', 9, 16) %>% 
+  pack_rows('Late-Early Ratio', 17, 24) %>% 
+  add_header_above(header = c(' ' = 1, 'AIC for neighborhood specification' = 3)) %>% 
+  row_spec(c(3, 11, 23), bold = T, color = "black", background = "lightyellow")
+
+```
+
+```{r assigning models}
+
+# adding our chosen model objects to the environment under easy-to-reference
+# names
+
+rate_sar <- rates_inv_dist[[2]][8][[1]]
+ie_sar <- ie_sar <- ie_inv_dist[[2]][8][[1]]
+late_early_sar <- late_early_inv_dist[[2]][8][[1]]
+
+```
+
+```{r display_all_coefs}
+
+# getting column names for kable output... need to do it like this so I can get
+# the names to cover multiple lines
+
+names_spaced <- c(
+  'Variable',
+  'Rate model: Change in abortions per 1k births',
+  'IE model: Multiplicative change in import-export ratio',
+  'Late-early model: Change in the square root of the late-early ratio'
+  )
+
+big_coef_df <- mutate(get_summary_df(rate_sar), dep = 'rate') %>% 
+  bind_rows(mutate(get_summary_df(ie_sar), dep = 'ie'),
+            mutate(get_summary_df(late_early_sar), dep = 'late-early')) %>% 
+  mutate(ci = ifelse(dep != 'ie',
+                     paste0('(', round(estimate-qnorm(0.975)*std_error, 3), 
+                            ', ', round(estimate+qnorm(0.975)*std_error, 3), ')'),
+                     paste0('(', round(exp(estimate-qnorm(0.975)*std_error), 3), 
+                            ', ', round(exp(estimate+qnorm(0.975)*std_error), 3), ')')),
+         estimate = ifelse(dep == 'ie', exp(estimate), estimate),
+         estimate = round(estimate, 3)) %>% 
+  mutate(estimate = ifelse(pr_z < 0.05, paste0(estimate, '*'), estimate),
+         pr_z = round(pr_z, 3),
+         estimate = paste(estimate, ci)) %>% 
+  select(term, estimate, dep) %>% 
+  pivot_wider(names_from = dep, values_from = estimate) %>% 
+  mutate(term = str_remove_all(term, 'within_between')) %>% 
+  mutate(term = str_remove_all(term, fixed('as.factor(year)'))) %>% 
+  mutate(term = fct_relevel(term,
+                            '(Intercept)',
+                            'surrounding_score', 
+                            'within_score', 
+                            'surrounding_score:within_score',
+                            'abortions', 'dem_2party', 'hh_income', 'pct_bachelors',
+                            'prop_hisp', 'prop_nonwhite')) %>% 
+  arrange(term)
+
+big_coef_df %>% 
+  kable(booktabs = TRUE,
+        #format = 'latex',
+        col.names = names_spaced) %>% 
+  pack_rows('Policy environment', 2, 4) %>%
+  pack_rows('Control variables', 5, 10) %>% 
+  pack_rows('Year', 11, 19) %>% 
+  column_spec(1:4, width = "10em") %>% 
+  row_spec(2:4, bold = T, color = "black", background = "lightyellow")
+
+
+# lots of collinearity when including interaction term
+
+# car::vif(rates_inv_dist[[2]][[4]], type = 'marginal')
+# car::vif(ie_inv_dist[[2]][[4]], type = 'marginal')
+# car::vif(late_early_inv_dist[[2]][[4]], type = 'marginal')
+# cor(usa@data$surrounding_score,
+#     usa@data$within_score)
+
+summary(ie_sar)
+car::vif(rates_inv_dist[[2]][6][[1]])
+
+```
+
 ## Abortion rates
 
 ```{r rate_sar}
@@ -151,15 +364,14 @@ usa@data %>%
 # printing moran test.. both this & the LR in the model summary have p-values <
 # 0.05... figure out what that means again
 
-rates_inv_dist[[3]][6][[1]]
+rates_inv_dist[[3]][8][[1]]
 
 # printing diagnostic plots
 
-rates_inv_dist[[4]][6][[1]]
+rates_inv_dist[[4]][8][[1]]
 
 # getting model summary
 
-rate_sar <- rates_inv_dist[[2]][6][[1]]
 summary(rate_sar)
 
 
@@ -179,17 +391,16 @@ summary(rate_sar)
 
 # printing out coefficients for policy categories on our chosen model
 
-ie_sar <- ie_inv_dist[[2]][6][[1]]
 summary(ie_sar)
 
 # printing moran test.. both this & the LR in the model summary have p-values <
 # 0.05... figure out what that means again
 
-ie_inv_dist[[3]][6][[1]]
+ie_inv_dist[[3]][8][[1]]
 
 # printing diagnostic plots
 
-ie_inv_dist[[4]][6][[1]]
+ie_inv_dist[[4]][8][[1]]
 
 # getting coefficients ready to interpret... higher IE ratio indicates that more
 # people travel in the state and few people leave the state.... lower ratios
@@ -228,17 +439,16 @@ ie_inv_dist[[4]][6][[1]]
 
 # printing out coefficients for policy categories on our chosen model
 
-late_early_sar <- late_early_inv_dist[[2]][6][[1]]
 summary(late_early_sar)
 
 # printing moran test.. both this & the LR in the model summary have p-values <
 # 0.05... figure out what that means again
 
-late_early_inv_dist[[3]][6][[1]]
+late_early_inv_dist[[3]][8][[1]]
 
 # printing diagnostic plots
 
-late_early_inv_dist2[[4]][6][[1]]
+late_early_inv_dist2[[4]][8][[1]]
 
 # plotting coefficients
 
@@ -251,84 +461,6 @@ late_early_inv_dist2[[4]][6][[1]]
 ```
 
 # Significant
-
-```{r display_all_coefs}
-
-# getting column names for kable output... need to do it like this so I can get
-# the names to cover multiple lines
-
-names_spaced <- c(
-  'Variable',
-  'Rate model: Change in abortions per 1k births',
-  'IE model: Multiplicative change in import-export ratio',
-  'Late-early model: Change in the square root of the late-early ratio'
-  )
-
-big_coef_df <- mutate(get_summary_df(rate_sar), dep = 'rate') %>% 
-  bind_rows(mutate(get_summary_df(ie_sar), dep = 'ie'),
-            mutate(get_summary_df(late_early_sar), dep = 'late-early')) %>% 
-  mutate(ci = ifelse(dep != 'ie',
-                     paste0('(', round(estimate-qnorm(0.975)*std_error, 3), 
-                            ', ', round(estimate+qnorm(0.975)*std_error, 3), ')'),
-                     paste0('(', round(exp(estimate-qnorm(0.975)*std_error), 3), 
-                            ', ', round(exp(estimate+qnorm(0.975)*std_error), 3), ')')),
-         estimate = ifelse(dep == 'ie', exp(estimate), estimate),
-         estimate = round(estimate, 3)) %>% 
-  mutate(estimate = ifelse(pr_z < 0.05, paste0(estimate, '*'), estimate),
-         pr_z = round(pr_z, 3),
-         estimate = paste(estimate, ci)) %>% 
-  select(term, estimate, dep) %>% 
-  pivot_wider(names_from = dep, values_from = estimate) %>% 
-  mutate(term = str_remove_all(term, 'within_between')) %>% 
-  mutate(term = str_remove_all(term, fixed('as.factor(year)'))) %>% 
-  mutate(term = fct_relevel(term,
-                            '(Intercept)',
-                            'interstate_score', 
-                            'intrastate_score', 
-                            'interstate_score:intrastate_score',
-                            'abortions', 'dem_2party', 'hh_income', 'pct_bachelors',
-                            'prop_hisp', 'prop_nonwhite')) %>% 
-  arrange(term)
-
-big_coef_df %>% 
-  kable(booktabs = TRUE,
-        #format = 'latex',
-        col.names = names_spaced) %>% 
-  pack_rows('Policy environment', 2, 3) %>%
-  pack_rows('Control variables', 4, 9) %>% 
-  pack_rows('Year', 10, 18) %>% 
-  column_spec(1:4, width = "10em") %>% 
-  row_spec(2, bold = T, color = "black", background = "lightyellow")
-
-
-# lots of collinearity when including interaction term
-
-car::vif(rates_inv_dist[[2]][[4]], type = 'marginal')
-car::vif(ie_inv_dist[[2]][[4]], type = 'marginal')
-car::vif(late_early_inv_dist[[2]][[4]], type = 'marginal')
-cor(usa@data$interstate_score,
-    usa@data$intrastate_score)
-
-```
-
-```{r model_comparison}
-
-# I want to also produce a grouped table with all model AICs
-
-mutate(get_model_comparisons(rates_inv_dist, rates_inv_dist2, rates_contig), var = 'rate') %>% 
-  bind_rows(mutate(get_model_comparisons(ie_inv_dist, ie_inv_dist2, ie_contig), var = 'ie')) %>% 
-  bind_rows(mutate(get_model_comparisons(late_early_inv_dist, late_early_inv_dist2, late_early_contig),
-                   var = 'late-early')) %>% 
-  group_by(var) %>% 
-  mutate(var = fct_relevel(var, 'rate', 'ie', 'late-early')) %>% 
-  arrange(var, AIC_inv_dist) %>% 
-  kable(booktabs = TRUE) %>% 
-  pack_rows('Abortion Rates (abortions per 1k live births)', 13, 18) %>% 
-  pack_rows('Import-Export Ratio', 1, 6) %>% 
-  pack_rows('Late-Early Ratio', 7, 12) %>% 
-  add_header_above(header = c(' ' = 1, 'AIC' = 3, ' ' = 2))
-
-```
 
 ```{r printing_sig_coefs}
 

@@ -7,29 +7,6 @@ source('model_helper.R')
 # creating neighborhood weight matrices
 {
   {
-    {
-      # getting spatial data for US state boundaries & subsetting out Alaska & Hawaii
-      # (using tutorial at https://mhallwor.github.io/_pages/basics_SpatialPolygons)
-      
-      usa <- raster::getData('GADM', country='USA', level=1)
-      usa <- usa[!usa$NAME_1 %in% c('Alaska', 'Hawaii'),]
-      
-      # merging with data
-      
-      usa <- merge(usa, nonspatial_df,
-                   by.x = 'NAME_1', by.y = 'state',
-                   duplicateGeoms = TRUE, all.x = FALSE)
-      
-      # ordering within-between categories so that the reference grouping makes sense
-      
-      usa@data$within_between <- fct_relevel(usa@data$within_between,
-                                             'low-low', 'med-low', 'high-low',
-                                             'low-med', 'med-med', 'high-med',
-                                             'low-high', 'med-high', 'high-high')
-      usa@data$within_between <- fct_relevel(usa@data$within_between,
-                                             'high-high')
-      
-    }
     
     # using poly2nb to create a neighbors list & from that a neighbors matrix
     # https://rspatial.org/raster/rosu/Chapter7.html
@@ -95,7 +72,7 @@ source('model_helper.R')
 {
   # rate models
   {
-    rates_inv_dist <- make_models(weights.inv.dist, 'rate',)
+    rates_inv_dist <- make_models(weights.inv.dist, 'rate')
     rates_inv_dist2 <- make_models(weights.inv.dist2, 'rate')
     rates_contig <- make_models(weights.contig.W, 'rate')
   }
