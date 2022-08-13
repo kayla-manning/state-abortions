@@ -93,10 +93,10 @@
     if (var == 'rate') {
       
       category_f <- as.formula(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                        prop_nonwhite + hh_income + dem_2party + as.factor(year))
+                        prop_nonwhite + hh_income + dem_2party + as.factor(year) + total_population)
       raw_f <- as.formula(abortion_per_1k_births ~ surrounding_score * within_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + 
-                            as.factor(year))
+                            as.factor(year) + total_population)
       
     }
     
@@ -104,10 +104,10 @@
       
       category_f <- as.formula(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
                                  prop_nonwhite + hh_income + dem_2party + as.factor(year) + 
-                                 abortions)
+                                 total_population)
       raw_f <- as.formula(log(ie_ratio) ~ surrounding_score * within_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + 
-                            abortions)
+                            total_population)
       
     }
     
@@ -115,10 +115,10 @@
       
       category_f <- as.formula(sqrt(late_to_early) ~ within_between + pct_bachelors + prop_hisp + 
                                  prop_nonwhite + hh_income + dem_2party + as.factor(year) + 
-                                 abortions)
+                                 total_population)
       raw_f <- as.formula(sqrt(late_to_early) ~ surrounding_score * within_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + 
-                            abortions)
+                            total_population)
       
     }
     
@@ -311,64 +311,3 @@
   }
 }
 
-# trying out nlme model... jittering lat/long so that the model will fit
-
-usa@data$latitude <- jitter(usa@data$latitude)
-usa@data$longitude <- jitter(usa@data$longitude)
-test <- lme(log(ie_ratio) ~ surrounding_score * within_score + pct_bachelors + 
-            prop_hisp + prop_nonwhite + hh_income + dem_2party + abortions,
-          data = usa@data,
-          #correlation = corGaus(1, form = ~ latitude + longitude|year),
-          random = ~ longitude + latitude | year)
-summary(test)
-test2gaus <- update(test, 
-                    correlation = corGaus(form = ~ longitude + latitude | year),
-                    control = lmeControl(opt = "optim"))
-summary(test2)
-AIC(test2)
-
-# note that contiguous neighbors are much less significant... is that the most
-# important relationship?
-
-moran.mc(residuals(test2), 
-         weights.contig.W, 
-         nsim = 999, 
-         alternative = 'two.sided')
-
-# doing the same thing with different correlation structure
-
-test2exp <- update(test, 
-                   correlation = corExp(form = ~ longitude + latitude | year),
-                   control = lmeControl(opt = "optim"))
-AIC(test2exp)
-
-test2lin <- update(test, 
-                   correlation = corLin(form = ~ longitude + latitude | year),
-                   control = lmeControl(opt = "optim"))
-AIC(test2lin)
-
-test2ratio <- update(test, 
-                   correlation = corRatio(form = ~ longitude + latitude | year),
-                   control = lmeControl(opt = "optim"))
-AIC(test2ratio)
-
-test2sphere <- update(test, 
-                     correlation = corSpher(form = ~ longitude + latitude | year),
-                     control = lmeControl(opt = "optim"))
-AIC(test2sphere)
-
-test2car <- update(test, 
-                    correlation = corCAR1(form = ~ longitude + latitude | year),
-                    control = lmeControl(opt = "optim"))
-AIC(test2car)
-
-test2compsymm <- update(test, 
-                   correlation = corCompSymm(form = ~ longitude + latitude | year),
-                   control = lmeControl(opt = "optim"))
-AIC(test2compsymm)
-
-test2ar1 <- update(test,
-                   correlation = corAR1(form = ~ longitude + latitude | year))
-AIC(test2ar1)
-
-c('none', 'gaus', 'exp', 'lin', 'ratio', 'spher', 'symm', 'compsymm')

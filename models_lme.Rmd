@@ -263,9 +263,9 @@ anova(fitted_models$rate$raw$all_mods$none, rate_mod) %>%
 # may eventually use ACF plots because those seem to be used for spatial model
 # diagnostics (need to do more research into these though)
 
-plot(ACF(rate_mod), alpha = 0.05)
-plot(ACF(ie_mod), alpha = 0.05)
-plot(ACF(late_early_mod), alpha = 0.05)
+#plot(ACF(rate_mod), alpha = 0.05)
+#plot(ACF(ie_mod), alpha = 0.05)
+#plot(ACF(late_early_mod), alpha = 0.05)
 
 ```
 
@@ -329,11 +329,11 @@ big_coef_df %>%
 # creating function to get year random effects from model
 
 get_yr_random <- function(mod) {
-  coef(mod) %>% 
+  ranef(mod) %>% 
     as.data.frame() %>% 
     rownames_to_column('year') %>% 
     rename(intercept = `(Intercept)`) %>% 
-    select(year, intercept, latitude, longitude)
+    select(year, intercept)
 }
 
 # doing this for my 3 models & displaying values together
@@ -343,9 +343,9 @@ mutate(get_yr_random(rate_mod), mod = 'rate') %>%
             mutate(get_yr_random(late_early_mod), mod = 'late_early')) %>% 
   select(-mod) %>% 
   kable(booktabs = TRUE,
-        col.names = c('Year', 'Intercept', 'Latitude', 'Longitude'),
+        col.names = c('Year', 'Intercept'),
         caption = 'Random Effects of Year on the Outcome Variables') %>% 
-  column_spec(1:4, width = "8em") %>% 
+  column_spec(1:2, width = "8em") %>% 
   pack_rows('Abortion Rates (abortions per 1k live births)', 1, 10) %>% 
   pack_rows('Import-Export Ratio', 11, 20) %>% 
   pack_rows('Late-Early Ratio', 21, 30)
@@ -438,9 +438,16 @@ plots[[3]]
 
 ```{r residual_corrplots}
 
-for (m in models) {
-  print(plot(Variogram(m)))
-}
+# decreasing semivariograms... what does this mean?
+
+plot(Variogram(rate_mod),
+     main = 'Semivariogram for rate_mod')
+plot(Variogram(ie_mod),
+     main = 'Semivariogram for ie_mod')
+plot(Variogram(late_early_mod),
+     main = 'Semivariogram for late_early_mod')
+
+plot(Variogram(usa@data$ie_ratio, cor_structs[[2]]))
 
 # creating plots of residuals for latitude, longitude, and year
 
@@ -467,6 +474,44 @@ residual_df %>%
   scale_y_continuous(limits = egg::symmetric_range) 
 
 ```
+
+## Category models
+
+```{r display_category_coefficients}
+
+# getting df for category coefficients
+
+mutate(rownames_to_column(as.data.frame(summary(fitted_models$rate$category$best_mod)$tTable), 'term'), 
+       dep = 'rate') %>% 
+  bind_rows(mutate(rownames_to_column(as.data.frame(summary(fitted_models$ie$category$best_mod)$tTable), 'term'), dep = 'ie'),
+            mutate(rownames_to_column(as.data.frame(summary(fitted_models$late_early$category$best_mod)$tTable), 'term'), dep = 'late-early')) %>% 
+  clean_names() %>% 
+  mutate(ci = ifelse(dep != 'ie',
+                     paste0('(', round(value-qnorm(0.975)*std_error, 3), 
+                            ', ', round(value+qnorm(0.975)*std_error, 3), ')'),
+                     paste0('(', round(exp(value-qnorm(0.975)*std_error), 3), 
+                            ', ', round(exp(value+qnorm(0.975)*std_error), 3), ')')),
+         value = ifelse(dep == 'ie', exp(value), value),
+         value = round(value, 3)) %>% 
+  mutate(value = ifelse(p_value < 0.05, paste0(value, '*'), value),
+         pr_z = round(p_value, 3),
+         value = paste(value, ci)) %>% 
+  select(term, value, dep) %>% 
+  pivot_wider(names_from = dep, values_from = value) %>% 
+  mutate(term = str_remove_all(term, 'within_between')) %>% 
+  mutate(term = str_remove_all(term, fixed('as.factor(year)'))) %>% 
+  kable(booktabs = TRUE,
+        #format = 'latex',
+        col.names = names_spaced,
+        caption = 'Fixed Effects for Linear Mixed Effects Models with Spatiotemporal Autocorrelation') %>% 
+  pack_rows('Policy category (within-between)', 2, 9) %>%
+  pack_rows('Control variables', 10, 15) %>% 
+  column_spec(1:4, width = "10em") %>% 
+  row_spec(c(4, 7:9), bold = T, color = "black", background = rep("lightyellow"))
+
+
+```
+
 
 ```{r state_categories}
 

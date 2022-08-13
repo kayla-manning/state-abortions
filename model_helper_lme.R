@@ -72,8 +72,8 @@
     # get an error for repeat observations in the same location
     
     set.seed(1973)
-    usa@data$latitude <- usa@data$latitude + rnorm(length(usa@data$latitude), 0, 0.0001)
-    usa@data$longitude <- usa@data$longitude + rnorm(length(usa@data$longitude), 0, 0.0001)
+    usa@data$latitude <- usa@data$latitude + rnorm(length(usa@data$latitude), 0, 0.00001)
+    usa@data$longitude <- usa@data$longitude + rnorm(length(usa@data$longitude), 0, 0.00001)
     
   }
   
@@ -128,16 +128,15 @@
     # creating list of spatial structures so I can fit models in a loop
     
     struct_types <- c('none', 'gaus')
-    cor_structs <- list(NA, corGaus(1, form = ~ (longitude + latitude) | year, 
-                                    nugget = TRUE))
+    cor_structs <- list(NA, corGaus(1, form = ~ (longitude + latitude) | year))
     
     # fitting models for the two treatments
     
     return_list <- list()
-    # treatments <- c('raw', 'category')
-    treatments <- c('raw')
+    treatments <- c('raw', 'category')
+    #treatments <- c('raw')
     formulas <- list(raw_f)
-    # formulas <- list(raw_f, category_f)
+    formulas <- list(raw_f, category_f)
     
     # fitting all models for the current outcome variable and treatment
     
@@ -152,7 +151,7 @@
       
       nonspatial <- lme(formulas[[i]], 
                         data = usa@data,
-                        random = list(year = ~1),
+                        random = ~ 1 | year,
                         control=lmeControl(opt = 'optim'))
       mods <- list(nonspatial)
       

@@ -82,8 +82,8 @@ do.call(rbind, lapply(residual_morans, tidy)) %>%
 
 ```{r distributions}
 
-#I want to plot all of the dependent variables & their respective
-#transformations to Gaussian
+# I want to plot all of the dependent variables & their respective
+# transformations to Gaussian
 
 {
   # this requires some data manipulation, which I'm doing below
@@ -261,11 +261,11 @@ comparison_df <- mutate(get_model_comparisons(rates_inv_dist, rates_inv_dist2, r
           col.names = c('Method', 'Inverse distance', 
                         'Inverse distance squared',
                         'Contiguous')) %>% 
-    pack_rows('Abortion Rates (abortions per 1k live births)', 1, 5) %>% 
-    pack_rows('Import-Export Ratio', 6, 10) %>% 
-    pack_rows('Late-Early Ratio', 11, 15) %>% 
+    pack_rows('Abortion Rates (abortions per 1k live births)', 1, 4) %>% 
+    pack_rows('Import-Export Ratio', 5, 8) %>% 
+    pack_rows('Late-Early Ratio', 9, 12) %>% 
     add_header_above(header = c(' ' = 1, 'AIC for neighborhood specification' = 3)) %>% 
-    row_spec(c(1, 6, 11), bold = T, color = "black", background = "lightyellow")
+    row_spec(c(1, 5, 9), bold = T, color = "black", background = "lightyellow")
 }
 
 # I want to also produce a grouped table with all model AICs
