@@ -170,6 +170,7 @@ do.call(rbind, lapply(residual_morans, tidy)) %>%
   kable(booktabs = TRUE,
         caption = "Moran's I-test on SAR model residuals")
 
+
 ```
 
 ```{r distributions}
@@ -391,7 +392,95 @@ moran_df %>%
   pack_rows('Inverse-distance neighborhoods', 4, 6) %>% 
   pack_rows('Inverse-squared-distance neighborhoods', 7, 9)
 
+############################ EXTRACTING MODEL WEIGHTS
+
+# extracting model weight & preparing listws for moran tests
+
+cor_mats <- as.matrix(Initialize(cor_structs[[2]], data = usa@data))
+listws <- lapply(cor_mats, mat2listw)
+moran_results <- list()
+m <- 1
+
+# iterating through the models
+
+for (mod in list(rate_mod, ie_mod, late_early_mod)) {
+  
+  # iterating through each year for each model
+  
+  for (i in 1:length(2010:2019)) {
+  
+    # getting the residuals for the current year
+    
+    this_year <- c(2010:2019)[i]
+    this_listw <- listws[[i]]
+    this_resid <- residuals(mod)[names(residuals(mod)) == as.character(this_year)]
+    
+    # now running the moran test
+    
+    moran_results[[m]] <- moran.mc(this_resid, 
+                                   this_listw,
+                                   alternative = 'two.sided',
+                                   nsim = 9999)
+    m <- m+1
+  }
+}
+
+# formatting the results, starting with a function
+
+format_moran <- function(moran) {
+  tibble(I = moran$statistic,
+         p = moran$p.value)
+}
+
+# putting Moran results in a nice table
+
+do.call(rbind, lapply(moran_results, format_moran)) %>% 
+  mutate(year = rep(2010:2019, times = 3),
+         var = rep(c('rate', 'ie', 'late-early'), each = 10),
+         # results = paste0(round(I, 3), ' (p=', round(p, 3), ')'),
+         significant = p < 0.05) %>% 
+  select(year, I, p) %>% 
+  kable(booktabs = TRUE,
+        #format = 'latex',
+        col.names = c('Year', 'I-statistic', 'p-value'),
+        caption = "Moran's I-test on spatial model residuals") %>% 
+  pack_rows('Abortion rates', 1, 10) %>%
+  pack_rows('Import-export ratio', 11, 20) %>% 
+  pack_rows('Late-early ratio', 21, 30) %>% 
+  column_spec(1:3, width = "7em") %>% 
+  row_spec(c(7, 11, 17, 27), bold = T, color = "black", background = rep("lightyellow"))
+
 ```
+
+```{r resid_maps}
+
+# I also want to map model residuals by year
+
+states <- map_data('state')
+data_resids <- usa@data %>% 
+  mutate(rate_resids = residuals(rate_mod),
+         ie_resids = residuals(ie_mod),
+         late_early_resids = residuals(late_early_mod),
+         NAME_1 = str_to_lower(NAME_1)) %>% 
+  inner_join(states, by = c('NAME_1' = 'region'))
+
+# making ggplot animations
+library(gganimate)
+data_resids %>%
+  ggplot() +
+  geom_polygon(aes(long, lat, group=group, fill = rate_resids),
+               color = 'black') +
+  transition_states(year) +
+  coord_fixed() +
+  labs(title = "Within-state policy scores in {closest_state}") +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+```
+
 
 ```{r model_plots}
 
