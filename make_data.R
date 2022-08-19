@@ -1,4 +1,3 @@
-
 # combining data / creating variables in this script
 
 ###############################
@@ -406,7 +405,8 @@
            !str_detect(state_location, 'Total')) %>% 
     select(-total_population.x) %>% 
     rename(state = state_location,
-           total_population = total_population.y)
+           total_population = total_population.y) %>% 
+    distinct()
   
   # writing to a csv for easy analysis
   

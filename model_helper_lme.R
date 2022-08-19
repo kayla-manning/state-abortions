@@ -27,7 +27,7 @@
   
   standardize <- function(x) {(x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)}
   nonspatial_df <- read_csv('raw-data/combined_data.csv') %>% 
-    mutate(hh_income = hh_income / 1000) %>% 
+    mutate(hh_income = hh_income) %>% 
     mutate(across(c(within_score, surrounding_score, hh_income, pct_bachelors, 
                     prop_hisp, prop_nonwhite, hh_income, dem_2party, total_population), 
                   standardize)) %>% 
@@ -59,28 +59,7 @@
                  by.x = 'NAME_1', by.y = 'state',
                  duplicateGeoms = TRUE, all.x = FALSE)
     
-    # ordering within-between categories so that the reference grouping makes sense
-    
-    usa@data$within_between <- fct_relevel(usa@data$within_between,
-                                           'low-low', 'med-low', 'high-low',
-                                           'low-med', 'med-med', 'high-med',
-                                           'low-high', 'med-high', 'high-high')
-    usa@data$within_between <- fct_relevel(usa@data$within_between,
-                                           'high-high')
-    
-    # introducing negligible random noise to latitude/longitude so that I don't
-    # get an error for repeat observations in the same location
-    
-    set.seed(1973)
-    usa@data$latitude <- usa@data$latitude + rnorm(length(usa@data$latitude), 0, 0.00001)
-    usa@data$longitude <- usa@data$longitude + rnorm(length(usa@data$longitude), 0, 0.00001)
-    
   }
-  
-  # I call this within a few of my functions
-  
-  methods <- c('category_lm', 'category_car', 'category_errorsar', 'category_lagsar',
-               'raw_lm', 'raw_car', 'raw_errorsar', 'raw_lagsar')
   
 }
 
@@ -100,8 +79,6 @@
     
     if (var == 'rate') {
       
-      category_f <- as.formula(sqrt(abortion_per_1k_births) ~ within_between + pct_bachelors + prop_hisp + 
-                                 prop_nonwhite + hh_income + dem_2party + total_population)
       raw_f <- as.formula(sqrt(abortion_per_1k_births) ~ surrounding_score * within_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
@@ -109,8 +86,6 @@
     
     if (var == 'ie') {
       
-      category_f <- as.formula(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                                 prop_nonwhite + hh_income + dem_2party + total_population)
       raw_f <- as.formula(log(ie_ratio) ~ surrounding_score * within_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
@@ -118,8 +93,6 @@
     
     if (var == 'late_early') {
       
-      category_f <- as.formula(sqrt(late_to_early) ~ within_between + pct_bachelors + prop_hisp + 
-                                 prop_nonwhite + hh_income + dem_2party + total_population)
       raw_f <- as.formula(sqrt(late_to_early) ~ surrounding_score * within_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
@@ -133,10 +106,8 @@
     # fitting models for the two treatments
     
     return_list <- list()
-    treatments <- c('raw', 'category')
-    #treatments <- c('raw')
+    treatments <- c('raw')
     formulas <- list(raw_f)
-    formulas <- list(raw_f, category_f)
     
     # fitting all models for the current outcome variable and treatment
     

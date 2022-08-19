@@ -18,7 +18,7 @@ source('model_helper.R')
   # writing the nb object to a file so that I don't have to recreate it every time
   # (it takes forever) & can just read it in directly
   
-  # write.nb.gal(usa_contig, 'raw-data/helper/usa_contig_nb.gal')
+  #write.nb.gal(usa_contig, 'raw-data/helper/usa_contig_nb.gal')
   usa_contig <- read.gal('raw-data/helper/usa_contig_nb.gal')
   
   # check for symmetric relationships (since if TX is a neighbor of OK, OK should
@@ -29,7 +29,6 @@ source('model_helper.R')
   # build binary weight matrix
   
   weights.contig.B <- nb2listw(usa_contig, style = "B")
-  print(weights.contig.B)
   
   # rescaling each row of B to sum to 1
   
@@ -37,18 +36,19 @@ source('model_helper.R')
   
   # creating weights based on the inverse distance
   
+  usa.dist.range <- dnearneigh(coordinates(usa),
+                               d1 = 0, # specify lower bound of range
+                               d2 = 2e4 # specify upper bound of range
+  )
   inv.dist <- lapply(nbdists(usa.dist.range, coordinates(usa)),
                      function(x) ifelse(x!=0, 1e3/(x), x))
-  weights.inv.dist <- nb2listw(usa.dist.range, 
-                               glist = inv.dist, # specify weights
-                               style = "B")
   
   # note style B uses the weights specified by inv.dist, 
   # setting style = W will renormalize the weights to sum to one
   
-  print(weights.inv.dist)
-  image(listw2mat(weights.inv.dist)[,281:1],
-        axes = FALSE)
+  weights.inv.dist <- nb2listw(usa.dist.range, 
+                               glist = inv.dist, # specify weights
+                               style = "W")
   
   # also created weights based on inverse distance squared, which will give a
   # greater penalty to states with larger distances (similar to the construction
@@ -58,14 +58,8 @@ source('model_helper.R')
                       function(x) ifelse(x!=0, 1e3/(x^2), x))
   weights.inv.dist2 <- nb2listw(usa.dist.range, 
                                 glist = inv.dist2, # specify weights
-                                style = "B")
-  
-  # note style B uses the weights specified by inv.dist, 
-  # setting style = W will renormalize the weights to sum to one
-  
-  print(weights.inv.dist2)
-  image(listw2mat(weights.inv.dist2)[,281:1],
-        axes = FALSE)
+                                style = "W")
+
 }
 
 # fitting models
@@ -92,61 +86,4 @@ source('model_helper.R')
   }
 }
 
-# extra (can probably get rid of this.. it's nonresident-resident ratio)
 
-{
-  # generating the models and diagnostics for the three different weights matrices
-  
-  nonres_res_inv_dist <- make_nonres_res_models(weights.inv.dist)
-  nonres_res_inv_dist2 <- make_nonres_res_models(weights.inv.dist2)
-  nonres_res_contig <- make_nonres_res_models(weights.contig.W)
-  
-  
-  # producing table as I did before... lowest AIC observed in SAR model with
-  # inv_dist weights
-  
-  get_model_comparisons(nonres_res_inv_dist, nonres_res_inv_dist2, nonres_res_contig) %>% 
-    kable(caption = 'Model selection for nonresident-to-resident ratios',
-          booktabs = TRUE)
-  
-  
-  # printing out coefficients for policy categories on our chosen model
-  
-  nonres_res_sar <- nonres_res_inv_dist[[2]][3][[1]]
-  summary(nonres_res_sar)
-  data.frame(coef(nonres_res_sar)) %>% 
-    rownames_to_column('term') %>% 
-    filter(str_detect(term, 'within_between')) %>% 
-    arrange(coef.nonres_res_sar.)
-  
-  # printing moran test.. both this & the LR in the model summary have p-values <
-  # 0.05... figure out what that means again
-  
-  nonres_res_inv_dist[[3]][3][[1]]
-  
-  # printing diagnostic plots
-  
-  nonres_res_inv_dist[[4]][3][[1]]
-  
-  # log(nonres/res - 1) = log((nonres-res) / res), so exponentiating coefficients
-  # yields the multiplicative increase in the difference between nonresident and
-  # resident abortions as a ratio of resident abortions... larger values means
-  # that there are relatively more out-of-state abortions & smaller values mean
-  # that there are relatively fewer out-of-state abortions
-  
-  data.frame(coef(nonres_res_sar)) %>% 
-    rownames_to_column('term') %>% 
-    filter(str_detect(term, 'within_between')) %>% 
-    mutate(coef.nonres_res_sar. = exp(coef.nonres_res_sar.)) %>% 
-    arrange(desc(coef.nonres_res_sar.)) %>% 
-    rename(exp_coef = coef.nonres_res_sar.)
-  
-  # creating my plot of coefficients
-  
-  get_coef_plot(nonres_res_sar) +
-    geom_vline(xintercept = log(1),
-               color = 'red', 
-               linetype = 'dotted') +
-    labs(title = 'States with less strict surroundings have significantly fewer people traveling in \nand more people traveling out',
-         subtitle = 'Relative to high-high reference group')
-}

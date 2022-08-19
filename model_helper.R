@@ -46,7 +46,7 @@
             pct_bachelors, total_population, prop_hisp, prop_nonwhite,
             hh_income, dem_2party)
   
-  # joining nonspatial data with spatial data
+  # joining nonspatial data with spatial polygon data
   {
     # getting spatial data for US state boundaries & subsetting out Alaska & Hawaii
     # (using tutorial at https://mhallwor.github.io/_pages/basics_SpatialPolygons)
@@ -59,22 +59,11 @@
     usa <- merge(usa, nonspatial_df,
                  by.x = 'NAME_1', by.y = 'state',
                  duplicateGeoms = TRUE, all.x = FALSE)
-    
-    # ordering within-between categories so that the reference grouping makes sense
-    
-    usa@data$within_between <- fct_relevel(usa@data$within_between,
-                                           'low-low', 'med-low', 'high-low',
-                                           'low-med', 'med-med', 'high-med',
-                                           'low-high', 'med-high', 'high-high')
-    usa@data$within_between <- fct_relevel(usa@data$within_between,
-                                           'high-high')
-    
     }
   
   # I call this within a few of my functions
   
-  methods <- c('category_lm', 'category_car', 'category_errorsar', 'category_lagsar',
-               'raw_lm', 'raw_car', 'raw_errorsar', 'raw_lagsar')
+  methods <- c('raw_lm', 'raw_car', 'raw_errorsar', 'raw_lagsar')
                
 }
 
@@ -92,19 +81,14 @@
     
     if (var == 'rate') {
       
-      category_f <- as.formula(abortion_per_1k_births ~ within_between + pct_bachelors + prop_hisp + 
-                        prop_nonwhite + hh_income + dem_2party + as.factor(year) + total_population)
-      raw_f <- as.formula(abortion_per_1k_births ~ surrounding_score * within_score + pct_bachelors + 
+      raw_f <- as.formula(sqrt(abortion_per_1k_births) ~ surrounding_score * within_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + 
                             as.factor(year) + total_population)
       
     }
     
     if (var == 'ie') {
-      
-      category_f <- as.formula(log(ie_ratio) ~ within_between + pct_bachelors + prop_hisp + 
-                                 prop_nonwhite + hh_income + dem_2party + as.factor(year) + 
-                                 total_population)
+
       raw_f <- as.formula(log(ie_ratio) ~ surrounding_score * within_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + 
                             total_population)
@@ -113,9 +97,6 @@
     
     if (var == 'late_early') {
       
-      category_f <- as.formula(sqrt(late_to_early) ~ within_between + pct_bachelors + prop_hisp + 
-                                 prop_nonwhite + hh_income + dem_2party + as.factor(year) + 
-                                 total_population)
       raw_f <- as.formula(sqrt(late_to_early) ~ surrounding_score * within_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + 
                             total_population)
@@ -125,25 +106,6 @@
     # fitting models
     
     {
-      # using the policy categories
-      
-      category_lm <- lm(category_f, data = usa@data)
-      category_car <- spautolm(category_f,
-                               data = usa@data,
-                               family = 'CAR',
-                               listw = weights_matrix)
-      category_errorsar <- errorsarlm(category_f,
-                                      data = usa@data,
-                                      listw = weights_matrix)
-      category_lagsar <- lagsarlm(category_f,
-                                  data = usa@data,
-                                  listw = weights_matrix,
-                                  tol.solve=1.0e-30)
-      # category_sma <- spautolm(category_f,
-      #                          data = usa@data,
-      #                          family = 'SMA',
-      #                          listw = weights_matrix,
-      #                          tol.solve = 1.0e-50)
       
       # using the raw scores
       
@@ -159,78 +121,17 @@
                              data = usa@data,
                              listw = weights_matrix,
                              tol.solve=1.0e-30)
-      # raw_sma <- spautolm(raw_f,
-      #                     data = usa@data,
-      #                     family = 'SMA',
-      #                     listw = weights_matrix,
-      #                     tol.solve=1.0e-50)
     }
     
-    # creating lists to store everything
+    # creating a list to store everything
     
-    {
-      models <- list(category_lm, category_car, category_errorsar, category_lagsar,
-                     raw_lm, raw_car, raw_errorsar, raw_lagsar)
-      morans <- vector('list', length = length(models))
-      plots <- vector('list', length = length(models))
-    }
+    models <- list(raw_lm, raw_car, raw_errorsar, raw_lagsar)
     
-    for (i in 1:length(models)) {
-      
-      ################
-      #### MORAN
-      ################
-      
-      {
-        # conduct a Moran test of the residuals, where p < 0.05 provides sufficient
-        # evidence of additional autocorrelation not captured by the model
-        
-        morans[[i]] <- moran.mc(residuals(models[[i]]), 
-                                listw = weights_matrix, 
-                                nsim = 9999,
-                                alternative = 'two.sided')
-      }
-      
-      ################
-      #### PLOTS
-      ################
-      
-      {
-        # generating diagnostic plots for each model
-        
-        resid_vs_fit <- tibble(fit = fitted(models[[i]]), 
-                               resid = residuals(models[[i]])) %>% 
-          ggplot(aes(fit, resid)) +
-          geom_point() +
-          geom_hline(yintercept = 0,
-                     color = 'red',
-                     linetype = 'dashed') +
-          theme_minimal() +
-          labs(title = 'Residuals vs. fitted values',
-               x = 'Fitted values',
-               y = 'Residuals')
-        plot_data <- tibble(fit = fitted(models[[i]]), 
-                            resid = residuals(models[[i]])) 
-        qqplot <- plot_data %>% 
-          ggplot(aes(sample = resid)) +
-          stat_qq() +
-          stat_qq_line(col = 'red') +
-          theme_minimal() +
-          labs(title = 'QQ-plot for normality of residuals',
-               x = 'Theoretical quantiles',
-               y = 'Sample quantiles')
-        
-        plots[[i]] <- annotate_figure(ggarrange(resid_vs_fit, qqplot),
-                                      top = text_grob(paste('Diagnosic plots for', methods[[i]]),size = 14))
-      }
-    }
+    # I want to return the methods & models
     
-    # I want to return the methods, models, moran tests, and diagnostic plots
-    
-    return_values <- list(methods, models, morans, plots)
+    return_values <- list(methods, models)
     print(paste('done with', var))
     return(return_values)
-    
   }
 }
 
@@ -240,17 +141,17 @@
   
   get_metrics <- function(mod) {
     if (is.null(summary(mod)$lambda)) {
-      metrics <- c(AIC(mod), logLik(mod), NA, NA)
+      metrics <- c(AIC(mod), BIC(mod), logLik(mod), NA, NA)
     }
     else {
-      metrics <- c(AIC(mod), logLik(mod), summary(mod)$lambda, summary(mod)$lambda.se)
+      metrics <- c(AIC(mod), BIC(mod), logLik(mod), summary(mod)$lambda, summary(mod)$lambda.se)
     }
     return(metrics)
   }
   
   # getting metrics for a specific model list
   
-  metrics <- c('AIC', 'logLik', 'lambda', 'lambda se')
+  metrics <- c('AIC', 'BIC', 'logLik', 'lambda', 'lambda se')
   get_metrics_table <- function(model_list) {
     tibble(method = rep(methods, each = length(metrics)),
            metric = rep(metrics, times = length(methods)),
@@ -268,17 +169,12 @@
                   mutate(weights = 'inv_dist2')) %>% 
       bind_rows(get_metrics_table(contig_list) %>% 
                   mutate(weights = 'contig')) %>% 
-      select(method, AIC, weights) %>% 
-      pivot_wider(names_from = weights,
-                  values_from = AIC,
-                  names_prefix = 'AIC_') %>% 
-      mutate(best_weights = case_when(AIC_inv_dist < AIC_inv_dist2 & AIC_inv_dist < AIC_contig ~ 'dist',
-                                      AIC_inv_dist > AIC_inv_dist2 & AIC_inv_dist2 < AIC_contig ~ 'dist2',
-                                      AIC_contig < AIC_inv_dist2 & AIC_inv_dist > AIC_contig ~ 'contig',
-                                      TRUE ~ ''),
-             best_weights = ifelse(best_weights == '', NA, best_weights))
+      select(method, AIC, BIC, logLik, weights) %>% 
+      pivot_longer(AIC:logLik, names_to = 'criteria')  %>% 
+      mutate(criteria = paste0(criteria, '_', weights)) %>% 
+      select(-weights) %>% 
+      pivot_wider(names_from = 'criteria', values_from = 'value')
   }
-  
 }
 
 # model interpretation (summary dfs & coefficient plots)
@@ -290,24 +186,6 @@
       as.data.frame() %>% 
       rownames_to_column('term') %>% 
       clean_names()
-  }
-  
-  # generating a plot with error bars for my SAR model
-  
-  get_coef_plot <- function(sar_mod) {
-    get_summary_df(sar_mod) %>% 
-      filter(str_detect(term, 'within_between')) %>% 
-      mutate(conf.low = estimate - qnorm(0.975)*std_error,
-             conf.high = estimate + qnorm(0.975)*std_error,
-             term = str_remove_all(term, 'within_between')) %>% 
-      select(term, estimate, conf.low, conf.high) %>% 
-      ggplot(aes(estimate, fct_reorder(term, estimate))) +
-      geom_point() +
-      geom_errorbar(aes(xmin = conf.low, xmax = conf.high)) +
-      theme_minimal() +
-      labs(x = 'Estimated coefficient',
-           y = 'Policy category',
-           subtitle = 'Relative to high-high reference group')
   }
 }
 
