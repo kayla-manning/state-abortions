@@ -218,7 +218,7 @@
       # defined above... need to exclude CO from 2018 because it does not have any
       # exports reported
       
-      ie_df <- inner_join(imports, exports, 
+      nonres_df <- inner_join(imports, exports, 
                           by = c('state_location' = 'state_residence', 
                                  'year')) %>% 
         filter(exports != 0) %>%
@@ -227,20 +227,7 @@
                imports != 0)
     }
     
-    # non-resident to resident ratio
-    {
-      nonres_res_df <- abortion_long %>% 
-        mutate(resident = state_location == state_residence) %>% 
-        group_by(resident, state_location, year) %>% 
-        summarise(count = sum(count, na.rm = TRUE),
-                  .groups = 'drop') %>% 
-        pivot_wider(names_from = resident, values_from = count, names_prefix = 'resident') %>% 
-        mutate(nonres_res_ratio = residentFALSE / residentTRUE) %>% 
-        filter(!state_location %in% c('Hawaii', 'Alaska', 'District of Columbia')) %>% 
-        select(-c(residentFALSE:residentNA))
-    }
-    
-    # abortion rates
+    # abortions per 1000 births
     {
       abortion_rates <- abortion_long %>% 
         inner_join(births, by = c('state_location' = 'state', 'year')) %>% 
@@ -253,7 +240,7 @@
         filter(!state_location %in% c('Hawaii', 'Alaska', 'District of Columbia'))
     }
     
-    # late-to-early ratio
+    # proportion of abortions occurring after 13 weeks
     {
       # now I want to get counts for pre13 and post13... since we have these missing
       # counts, I will subtract total_report - x0_13 to get the post13 (which will
@@ -266,18 +253,21 @@
         mutate(post13 = total_reported - x0_13,
                prop_late = post13 / total_reported) %>% 
         rename(pre13 = x0_13) %>% 
-        select(state, year, pre13, post13) 
+        select(state, year, prop_late, pre13, post13) 
       
     }
   }
   
   # combining everything
   {
-    # combining all of the dataframes with data on dependent variables
+    # combining all of the data frames with data on dependent variables (adding
+    # a fudge factor to nonresident abortion rates since we can't take the log
+    # of 0)
     
     dep_var_df <- inner_join(ie_df, abortion_rates, by = c('state_location', 'year')) %>% 
       inner_join(late_early_df, by = c('state_location' = 'state', 'year')) %>% 
-      mutate(late_to_early = post13 / pre13) %>% 
+      mutate(late_to_early = post13 / pre13,
+             prop_nonres = (imports / abortions)+1e-10) %>% 
       inner_join(nonres_res_df, by = c('state_location', 'year'))
     
   }

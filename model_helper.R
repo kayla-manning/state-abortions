@@ -32,6 +32,8 @@
     mutate(across(c(within_score, surrounding_score, hh_income, pct_bachelors, 
                     prop_hisp, prop_nonwhite, hh_income, dem_2party, total_population), 
                   standardize)) %>% 
+    mutate(late_to_early = post13 / (pre13 + post13)) %>% 
+    mutate(ie_ratio = imports/abortions) %>%
     inner_join(
       read.delim('https://www2.census.gov/geo/docs/reference/cenpop2020/CenPop2020_Mean_ST.txt') %>% 
         separate(STATEFP.STNAME.POPULATION.LATITUDE.LONGITUDE, sep = ',',

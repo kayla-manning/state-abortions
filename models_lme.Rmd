@@ -40,7 +40,7 @@ p1 <- map_df %>%
   scale_fill_gradient2(high = 'red3') +
   coord_fixed() +
   facet_wrap(~year) +
-  labs(title = 'Abortions per 1k births',
+  labs(title = 'Abortion Rate',
        fill = '') +
   theme(panel.background = element_blank(),
         axis.text = element_blank(),
@@ -53,12 +53,12 @@ p1 <- map_df %>%
 p2 <- map_df %>% 
   filter(year %in% c(2010, 2019)) %>% 
   ggplot() +
-  geom_polygon(aes(long, lat, group = group, fill = ie_ratio),
+  geom_polygon(aes(long, lat, group = group, fill = prop_nonres),
                color = 'black') +
   scale_fill_gradient2(high = 'red3') +
   coord_fixed() +
   facet_wrap(~year) +
-  labs(title = 'Import-export ratio',
+  labs(title = 'Nonresident Share of Abortions',
        fill = '') +
   theme(panel.background = element_blank(),
         axis.text = element_blank(),
@@ -71,12 +71,12 @@ p2 <- map_df %>%
 p3 <- map_df %>% 
   filter(year %in% c(2010, 2019)) %>% 
   ggplot() +
-  geom_polygon(aes(long, lat, group = group, fill = late_to_early),
+  geom_polygon(aes(long, lat, group = group, fill = prop_late),
                color = 'black') +
   scale_fill_gradient2(high = 'red3') +
   coord_fixed() +
   facet_wrap(~year) +
-  labs(title = 'Late-early ratio',
+  labs(title = 'Later-term Share of Abortions',
        fill = '') +
   theme(panel.background = element_blank(),
         axis.text = element_blank(),
@@ -97,11 +97,11 @@ ggarrange(p1, p2, p3, nrow = 3) %>%
 # creating plots of raw data for latitude, longitude, and year
 
 usa@data %>% 
-  select(abortion_per_1k_births, ie_ratio, late_to_early,
+  select(abortion_per_1k_births, prop_nonres, prop_late,
          latitude, longitude, year) %>% 
   rename(rate = abortion_per_1k_births,
-         ie = ie_ratio,
-         late_early = late_to_early,
+         ie = prop_nonres,
+         late_early = prop_late,
          lat = latitude, 
          long = longitude) %>% 
   pivot_longer(rate:late_early, 
@@ -133,8 +133,8 @@ m <- 1
 # iterating through the variables
 
 for (outcome in list(usa@data$abortion_per_1k_births,
-                     usa@data$ie_ratio,
-                     usa@data$late_to_early)) {
+                     usa@data$prop_nonres,
+                     usa@data$prop_late)) {
   
   # iterating through each year for each model
   
@@ -185,18 +185,18 @@ do.call(rbind, lapply(global_moran_results, tidy)) %>%
   
   untransformed <- usa@data %>% 
     select(abortion_per_1k_births,
-           ie_ratio,
-           late_to_early) %>% 
+           prop_nonres,
+           prop_late) %>% 
     pivot_longer(everything()) %>% 
     mutate(transformed = FALSE,
            transformation = case_when(name == 'abortion_per_1k_births' ~ 'sqrt(x)',
-                                      name == 'ie_ratio' ~ 'log(x)',
-                                      name == 'late_to_early' ~ 'sqrt(x)')) 
+                                      name == 'prop_nonres' ~ 'log(x)',
+                                      name == 'prop_late' ~ 'sqrt(x)')) 
   
   graph_df <- untransformed %>% 
     mutate(value = case_when(name == 'abortion_per_1k_births' ~ sqrt(value),
-                                      name == 'ie_ratio' ~ log(value),
-                                      name == 'late_to_early' ~ sqrt(value)),
+                                      name == 'prop_nonres' ~ log(value),
+                                      name == 'prop_late' ~ sqrt(value)),
            transformed = TRUE) %>% 
     bind_rows(untransformed) %>% 
     mutate(transformation = ifelse(transformed, transformation, 'untransformed')) 
@@ -204,7 +204,7 @@ do.call(rbind, lapply(global_moran_results, tidy)) %>%
   # creating a list of plots in a loop to streamline the code
   
   plots <- list()
-  dep_vars <- c('abortion_per_1k_births', 'ie_ratio', 'late_to_early')
+  dep_vars <- c('abortion_per_1k_births', 'prop_nonres', 'prop_late')
   for (i in 1:length(dep_vars)) {
     plots[[i]] <- graph_df %>% 
       filter(name == dep_vars[i]) %>% 
@@ -219,7 +219,7 @@ do.call(rbind, lapply(global_moran_results, tidy)) %>%
   # printing out the plots
   
   ggarrange(plots[[1]], plots[[2]], plots[[3]],
-            nrow = 2) %>% 
+            nrow = 3) %>% 
     annotate_figure(left = textGrob('Count', rot = 90, vjust = 1),
                     bottom = textGrob('Value'),
                     top = text_grob('Dependent variables as approximately Gaussian distributions', 
@@ -238,8 +238,8 @@ do.call(rbind, lapply(global_moran_results, tidy)) %>%
 # names
 
 rate_mod <- fitted_models$rate$raw$best_mod
-ie_mod <- fitted_models$ie$raw$best_mod
-late_early_mod <- fitted_models$late_early$raw$best_mod
+prop_nonres_mod <- fitted_models$prop_nonres$raw$best_mod
+prop_late_mod <- fitted_models$prop_late$raw$best_mod
 
 ```
 
@@ -249,16 +249,18 @@ late_early_mod <- fitted_models$late_early$raw$best_mod
 
 i <- 1
 anova(fitted_models$rate$raw$all_mods$none, fitted_models$rate$raw$all_mods$gaus) %>% 
-  bind_rows(anova(fitted_models$ie$raw$all_mods$none, fitted_models$ie$raw$all_mods$gaus)) %>% 
-  bind_rows(anova(fitted_models$late_early$raw$all_mods$none, fitted_models$late_early$raw$all_mods$gaus)) %>%
+  bind_rows(anova(fitted_models$prop_nonres$raw$all_mods$none, fitted_models$prop_nonres$raw$all_mods$gaus)) %>% 
+  bind_rows(anova(fitted_models$prop_late$raw$all_mods$none, fitted_models$prop_late$raw$all_mods$gaus)) %>%
   as_tibble() %>% 
-  mutate(`Correlation Structure` = rep(c('none', 'gaus'), times = 3)) %>% 
+  mutate(` ` = rep(c('Nonspatial', 'Spatial'), times = 3)) %>% 
   select(-c(call, Model)) %>% 
-  select(`Correlation Structure`, everything()) %>% 
+  select(` `, everything()) %>% 
+  mutate(across(c(AIC:logLik, L.Ratio), function(x) round(x, 1))) %>%
+  mutate(`p-value` = round(`p-value`, 3)) %>% 
   kable(booktabs = TRUE,
-        caption = 'Likelihood Ratio Tests do not support the use of spatiotemporal models') %>% 
-  column_spec(1:4, width = "5em") %>% 
-  # row_spec(seq(2, 6, 2), bold = T, color = "black", background = "lightyellow") %>% 
+        caption = 'Likelihood Ratio Tests do not support the use of spatial models',
+        align=c(rep('c', times = 7))) %>% 
+  column_spec(1:7, width = "6em") %>% 
   pack_rows('Abortion Rates (abortions per 1k live births)', 1, 2) %>% 
   pack_rows('Import-Export Ratio', 3, 4) %>% 
   pack_rows('Late-Early Ratio', 5, 6) 
@@ -267,8 +269,8 @@ anova(fitted_models$rate$raw$all_mods$none, fitted_models$rate$raw$all_mods$gaus
 # diagnostics (need to do more research into these though)
 
 #plot(ACF(rate_mod), alpha = 0.05)
-#plot(ACF(ie_mod), alpha = 0.05)
-#plot(ACF(late_early_mod), alpha = 0.05)
+#plot(ACF(prop_nonres_mod), alpha = 0.05)
+#plot(ACF(prop_late_mod), alpha = 0.05)
 
 ```
 
@@ -279,9 +281,9 @@ anova(fitted_models$rate$raw$all_mods$none, fitted_models$rate$raw$all_mods$gaus
 
 names_spaced <- c(
   'Variable',
-  'Rate model: Change in the square root of abortion rates (abortions per 1k births)',
-  'IE model: Multiplicative change in import-export ratio',
-  'Late-early model: Change in the square root of the late-early ratio'
+  'Rate model: Change in the square root of the abortion rate',
+  'IE model: Multiplicative change in nonresident abortion rate',
+  'Late-early model: Change in the square root of the later-term abortion rate'
   )
 
 get_summary_df <- function (mod) {
@@ -289,8 +291,8 @@ get_summary_df <- function (mod) {
 }
 
 big_coef_df <- mutate(get_summary_df(rate_mod), dep = 'rate') %>% 
-  bind_rows(mutate(get_summary_df(ie_mod), dep = 'ie'),
-            mutate(get_summary_df(late_early_mod), dep = 'late-early')) %>% 
+  bind_rows(mutate(get_summary_df(prop_nonres_mod), dep = 'ie'),
+            mutate(get_summary_df(prop_late_mod), dep = 'late-early')) %>% 
   clean_names() %>% 
   mutate(ci = ifelse(dep != 'ie',
                      paste0('(', round(value-qnorm(0.975)*std_error, 3), 
@@ -305,7 +307,6 @@ big_coef_df <- mutate(get_summary_df(rate_mod), dep = 'rate') %>%
   select(term, value, dep) %>% 
   pivot_wider(names_from = dep, values_from = value) %>% 
   mutate(term = str_remove_all(term, 'within_between')) %>% 
-  mutate(term = str_remove_all(term, fixed('as.factor(year)'))) %>% 
   mutate(term = fct_relevel(term,
                             '(Intercept)',
                             'surrounding_score', 
@@ -319,12 +320,13 @@ big_coef_df %>%
   kable(booktabs = TRUE,
         #format = 'latex',
         col.names = names_spaced,
-        caption = 'Fixed Effects for Linear Mixed Effects Models with Spatiotemporal Autocorrelation') %>% 
+        caption = 'Fixed Effects Coefficients for Linear Mixed-Effects Models',
+        align = c('l', rep('c', times = 3))) %>% 
   pack_rows('Policy environment', 2, 4) %>%
   pack_rows('Control variables', 5, 10) %>% 
-  column_spec(1:4, width = "10em") %>% 
+  column_spec(1:4, width = "15em") %>% 
   row_spec(c(2, 4), bold = T, color = "black", background = "lightyellow")
-
+prop_nonres_mod
 ```
 
 ```{r temporal_effects}
@@ -341,17 +343,31 @@ get_yr_random <- function(mod) {
 
 # doing this for my 3 models & displaying values together
 
-mutate(get_yr_random(rate_mod), mod = 'rate') %>% 
-  bind_rows(mutate(get_yr_random(ie_mod), mod = 'ie'), 
-            mutate(get_yr_random(late_early_mod), mod = 'late_early')) %>% 
+temporal_df <- mutate(get_yr_random(rate_mod), mod = 'rate') %>% 
+  bind_rows(mutate(get_yr_random(prop_nonres_mod), mod = 'prop_nonres'), 
+            mutate(get_yr_random(prop_late_mod), mod = 'prop_late')) 
+temporal_df %>% 
   select(-mod) %>% 
   kable(booktabs = TRUE,
         col.names = c('Year', 'Intercept'),
         caption = 'Random Effects of Year on the Outcome Variables') %>% 
   column_spec(1:2, width = "8em") %>% 
-  pack_rows('Abortion Rates (abortions per 1k live births)', 1, 10) %>% 
-  pack_rows('Import-Export Ratio', 11, 20) %>% 
-  pack_rows('Late-Early Ratio', 21, 30)
+  pack_rows('Abortion Rate', 1, 10) %>% 
+  pack_rows('Nonresident Share of Abortions', 11, 20) %>% 
+  pack_rows('Later-term Share of Abortions', 21, 30)
+
+# visualizing in a plot
+
+temporal_df %>% 
+  mutate(mod = fct_relevel(mod, 'rate', 'prop_nonres', 'prop_late')) %>% 
+  ggplot(aes(year, intercept)) +
+  geom_point() +
+  facet_wrap(~mod, scales = 'free_y', nrow = 3) +
+  geom_smooth() +
+  theme_bw() +
+  labs(title = 'Temporal random intercepts',
+       x = '',
+       y = 'Random intercepts')
 
 ```
 
@@ -368,7 +384,7 @@ m <- 1
 
 # iterating through the models
 
-for (mod in list(rate_mod, ie_mod, late_early_mod)) {
+for (mod in list(rate_mod, prop_nonres_mod, prop_late_mod)) {
   
   # iterating through each year for each model
   
@@ -416,8 +432,8 @@ do.call(rbind, lapply(moran_results, tidy)) %>%
 states <- map_data('state')
 data_resids <- usa@data %>% 
   mutate(rate_resids = residuals(rate_mod),
-         ie_resids = residuals(ie_mod),
-         late_early_resids = residuals(late_early_mod),
+         ie_resids = residuals(prop_nonres_mod),
+         late_early_resids = residuals(prop_late_mod),
          NAME_1 = str_to_lower(NAME_1)) %>% 
   inner_join(states, by = c('NAME_1' = 'region'))
 
@@ -442,7 +458,7 @@ data_resids %>%
 
 # generating diagnostic plots for each model
 
-models <- list(rate_mod, ie_mod, late_early_mod)
+models <- list(rate_mod, prop_nonres_mod, prop_late_mod)
 plots <- list()
 for (i in 1:length(models)) {
   
@@ -487,18 +503,18 @@ plots
 
 plot(Variogram(rate_mod),
      main = 'Semivariogram for rate_mod')
-plot(Variogram(ie_mod),
-     main = 'Semivariogram for ie_mod')
-plot(Variogram(late_early_mod),
-     main = 'Semivariogram for late_early_mod')
+plot(Variogram(prop_nonres_mod),
+     main = 'Semivariogram for prop_nonres_mod')
+plot(Variogram(prop_late_mod),
+     main = 'Semivariogram for prop_late_mod')
 
-plot(Variogram(usa@data$ie_ratio, cor_structs[[2]]))
+plot(Variogram(usa@data$prop_nonres, cor_structs[[2]]))
 
 # creating plots of residuals for latitude, longitude, and year
 
 residual_df <- tibble(rate_resid = residuals(rate_mod),
-                      ie_resid = residuals(ie_mod),
-                      late_early_resid = residuals(late_early_mod),
+                      ie_resid = residuals(prop_nonres_mod),
+                      late_early_resid = residuals(prop_late_mod),
                       lat = usa@data$latitude,
                       long = usa@data$longitude,
                       year = usa@data$year)

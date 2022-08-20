@@ -70,7 +70,7 @@
 {
   # creating list of variables to iterate through
   
-  outcome_vars <- c('rate', 'ie', 'late_early')
+  outcome_vars <- c('rate', 'prop_nonres', 'prop_late')
   fitted_models <- list()
   
   for (var in outcome_vars) {
@@ -84,16 +84,16 @@
       
     }
     
-    if (var == 'ie') {
+    if (var == 'prop_nonres') {
       
-      raw_f <- as.formula(log(ie_ratio) ~ surrounding_score * within_score + pct_bachelors + 
+      raw_f <- as.formula(log(prop_nonres) ~ surrounding_score * within_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }
     
-    if (var == 'late_early') {
+    if (var == 'prop_late') {
       
-      raw_f <- as.formula(sqrt(late_to_early) ~ surrounding_score * within_score + pct_bachelors + 
+      raw_f <- as.formula(sqrt(prop_late) ~ surrounding_score * within_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }

@@ -77,17 +77,18 @@ do.call(rbind, lapply(moran_list, tidy)) %>%
   # this requires some data manipulation, which I'm doing below
   
   untransformed <- usa@data %>% 
+    mutate(ie_ratio = imports/abortions) %>%
     select(abortion_per_1k_births,
            ie_ratio,
            late_to_early) %>% 
     pivot_longer(everything()) %>% 
     mutate(transformed = FALSE,
-           transformation = case_when(name == 'abortion_per_1k_births' ~ 'none',
+           transformation = case_when(name == 'abortion_per_1k_births' ~ 'sqrt(x)',
                                       name == 'ie_ratio' ~ 'log(x)',
                                       name == 'late_to_early' ~ 'sqrt(x)')) 
   
   graph_df <- untransformed %>% 
-    mutate(value = case_when(name == 'abortion_per_1k_births' ~ value,
+    mutate(value = case_when(name == 'abortion_per_1k_births' ~ sqrt(value),
                                       name == 'ie_ratio' ~ log(value),
                                       name == 'late_to_early' ~ sqrt(value)),
            transformed = TRUE) %>% 
@@ -241,10 +242,10 @@ comparison_df <- mutate(get_model_comparisons(rates_inv_dist, rates_inv_dist2, r
            AIC_inv_dist, AIC_inv_dist2, AIC_contig,
            BIC_inv_dist, BIC_inv_dist2, BIC_contig,
            logLik_inv_dist, logLik_inv_dist2, logLik_contig) %>% 
-    arrange(var, AIC_inv_dist) %>% 
+    arrange(var, AIC_inv_dist2) %>% 
   select(-var)
 
-# producing a table with only the raw models
+# producing a formatted table
 
 {
   comparison_df %>% 
@@ -276,7 +277,7 @@ comparison_df <- mutate(get_model_comparisons(rates_inv_dist, rates_inv_dist2, r
 # names
 
 rate_sar <- rates_inv_dist[[2]][3][[1]]
-ie_sar <- ie_inv_dist[[2]][3][[1]]
+ie_sar <- ie_inv_dist2[[2]][3][[1]]
 late_early_sar <- late_early_inv_dist[[2]][3][[1]]
 
 ```
@@ -331,6 +332,53 @@ big_coef_df %>%
   row_spec(c(2, 4), bold = T, color = "black", background = "lightyellow")
 
 ```
+
+```{r count_models}
+
+# ** NEED TO TRY TO GET THESE AS SPATIAL MODELS **
+# https://cran.r-project.org/web/packages/glmmfields/vignettes/spatial-glms.html
+
+########
+
+# I know the rate of later-term increases, but what about the absolute number?
+# insignificant INCREASE (still!)
+
+test_late <- MASS::glm.nb(post13 ~  surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + 
+                            as.factor(year) + total_population,
+    data = usa@data)
+summary(test_late)
+plot(test_late)
+
+# early (insignficant decrease)
+
+test_early <- MASS::glm.nb(pre13 ~  surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + 
+                            as.factor(year) + total_population,
+    data = usa@data)
+summary(test_early)
+plot(test_early)
+
+# doing same thing but for imports (SIGNIFICANT INCREASE)
+
+test_nonres <- MASS::glm.nb(imports ~  surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + 
+                            as.factor(year) + total_population,
+    data = usa@data)
+summary(test_nonres)
+plot(test_nonres)
+
+# now looking at absolute count of abortions
+
+test_total <- MASS::glm.nb(abortions ~  surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem2party + 
+                            as.factor(year) + total_population,
+    data = usa@data)
+summary(test_total)
+plot(test_total)
+
+```
+
 
 ```{r moran_resids}
 
