@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE,
 
 # calling helper file that reads in all packages, data, and homemade functions
 
-source('model_helper.R')
+source('model_helper_spatialreg.R')
 # source('fit_models.R')
 
 # loading packages & map data here since that's not specifically for modeling &

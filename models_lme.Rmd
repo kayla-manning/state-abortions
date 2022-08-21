@@ -264,14 +264,8 @@ anova(fitted_models$rate$raw$all_mods$none, fitted_models$rate$raw$all_mods$gaus
   column_spec(1:7, width = "6em") %>% 
   pack_rows('Abortion Rates (abortions per 1k live births)', 1, 2) %>% 
   pack_rows('Import-Export Ratio', 3, 4) %>% 
-  pack_rows('Late-Early Ratio', 5, 6) 
-
-# may eventually use ACF plots because those seem to be used for spatial model
-# diagnostics (need to do more research into these though)
-
-#plot(ACF(rate_mod), alpha = 0.05)
-#plot(ACF(prop_nonres_mod), alpha = 0.05)
-#plot(ACF(prop_late_mod), alpha = 0.05)
+  pack_rows('Late-Early Ratio', 5, 6)  %>% 
+  row_spec(seq(1, 5, by = 2), bold = T, color = "black", background = "lightyellow")
 
 ```
 
@@ -287,14 +281,13 @@ names_spaced <- c(
   'Later-term share model: Change in the square root of the later-term abortion rate'
   )
 
-get_summary_df <- function (mod) {
-  return(rownames_to_column(as.data.frame(summary(mod)$tTable), 'term'))
+get_lme_summary_df <- function (mod) {
+  return(clean_names(rownames_to_column(as.data.frame(summary(mod)$tTable), 'term')))
 }
 
-big_coef_df <- mutate(get_summary_df(rate_mod), dep = 'rate') %>% 
-  bind_rows(mutate(get_summary_df(prop_nonres_mod), dep = 'nonres'),
-            mutate(get_summary_df(prop_late_mod), dep = 'late')) %>% 
-  clean_names() %>% 
+big_coef_df <- mutate(get_lme_summary_df(rate_mod), dep = 'rate') %>% 
+  bind_rows(mutate(get_lme_summary_df(prop_nonres_mod), dep = 'nonres'),
+            mutate(get_lme_summary_df(prop_late_mod), dep = 'late')) %>% 
   mutate(ci = paste0('(', round(value-qnorm(0.975)*std_error, 3), 
                      ', ', round(value+qnorm(0.975)*std_error, 3), ')'),
          value = round(value, 3)) %>% 
@@ -355,17 +348,86 @@ temporal_df %>%
 
 # visualizing in a plot
 
+facet_labs <- c('Square-root of the abortion rate',
+                'Natural log of the nonresident share of abortions',
+                'Square-root of the later-term share of abortions')
+names(facet_labs) <- c('rate', 'prop_nonres', 'prop_late')
+
 temporal_df %>% 
   mutate(mod = fct_relevel(mod, 'rate', 'prop_nonres', 'prop_late')) %>% 
+  mutate(mod = recode(mod,
+                      'Square-root of the abortion rate' = 'rate',
+                      'Natural log of the nonresident share of abortions' = 'prop_nonres',
+                      'Square-root of the later-term share of abortions' = 'prop_late')) %>% 
   ggplot(aes(year, intercept)) +
   geom_point() +
-  facet_wrap(~mod, scales = 'free_y', nrow = 3) +
+  facet_wrap(~mod, scales = 'free_y', nrow = 3,
+             labeller = labeller(mod = facet_labs)) +
   geom_hline(yintercept = 0, color = 'red', linetype = 'dotted') +
   geom_smooth() +
   theme_bw() +
   labs(title = 'Temporal random intercepts',
        x = '',
        y = 'Random intercepts')
+
+```
+
+## Count models
+
+```{r fitting_count_models}
+
+# writing function to get qqplot
+
+get_qq <- function(mod) {
+  qqnorm(residuals(mod))
+  qqline(residuals(mod))
+}
+
+library(lme4)
+
+# interaction term is significant and positive for late count... that means more
+# hostile --> greater increase in count of later term
+
+test_late <- glmer.nb(post13 ~ surrounding_score * within_score + pct_bachelors + 
+           prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population +
+           (1 | year),
+           data = usa@data)
+summary(test_late)
+
+# model diagnostics (see
+# https://stats.stackexchange.com/questions/70558/diagnostic-plots-for-count-regression
+# for descriptions & more examples)
+
+plot(fitted(test_late), residuals(test_late),
+     xlim = c(0, 1000))
+get_qq(test_late)
+anova(test_late, test = 'Chisq')
+deviance(test_late)/test_late$df.residual
+
+# doing same thing to see what happens to early count
+
+test_early <- glmer.nb(pre13 ~ surrounding_score * within_score + pct_bachelors + 
+           prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population +
+           (1 | year),
+           data = usa@data,
+           control=glmerControl(optimizer="bobyqa",
+                               optCtrl=list(maxfun=2e10)))
+summary(test_early)
+plot(fitted(test_early), residuals(test_early),
+     xlim = c(0, 50000))
+plot(fitted(test_early), residuals(test_early))
+get_qq(test_early)
+
+# and nonresident counts
+
+test_nonres <- glmer.nb(imports ~ surrounding_score * within_score + pct_bachelors + 
+           prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population +
+           (1 | year),
+           data = usa@data,
+           control=glmerControl(optimizer="bobyqa",
+                               optCtrl=list(maxfun=2e10)))
+summary(test_nonres)
+get_qq(test_nonres)
 
 ```
 
@@ -548,4 +610,90 @@ residual_df %>%
   scale_y_continuous(limits = egg::symmetric_range) 
 
 ```
+
+## Spatialreg & robustness check
+
+```{r fit_spatialreg}
+
+
+
+```
+
+
+```{r robustness_check_setup}
+
+# writing a function to get the summary df object for my SAR models
+
+get_sar_summary_df <- function(sar_mod) {
+  unclass(summary(sar_mod))$Coef %>% 
+    as.data.frame() %>% 
+    rownames_to_column('term') %>% 
+    clean_names() %>% 
+    rename(value = estimate,
+           p_value = pr_z)
+}
+
+# adding our chosen model objects to the environment under easy-to-reference
+# names
+
+rate_sar <- rates_inv_dist[[2]][3][[1]]
+prop_nonres_sar <- prop_nonres_inv_dist[[2]][3][[1]]
+prop_late_sar <- prop_late_inv_dist[[2]][3][[1]]
+
+# I want to display `nlme` and `spatialreg` model coefficients all together
+
+all_robustness_df <- mutate(get_lme_summary_df(rate_mod), dep = 'rate_mixef_nonspatial') %>% 
+  bind_rows(mutate(get_lme_summary_df(prop_nonres_mod), dep = 'prop_nonres_mixef_nonspatial'),
+            mutate(get_lme_summary_df(prop_late_mod), dep = 'prop_late_mixef_nonspatial'),
+            mutate(get_sar_summary_df(rate_sar), dep = 'rate_fixef_sar'),
+            mutate(get_sar_summary_df(prop_nonres_sar), dep = 'prop_nonres_fixef_sar'),
+            mutate(get_sar_summary_df(prop_late_sar), dep = 'prop_late_fixef_sar')) %>% 
+  filter(str_detect(term, 'score')) %>% 
+  mutate(value = ifelse(p_value < 0.05, paste0(round(value, 3), '*'), round(value, 3)),
+         pr_z = round(p_value, 3)) %>% 
+  select(term, value, dep) %>% 
+  pivot_wider(names_from = dep, values_from = value) %>% 
+  mutate(term = fct_relevel(term,
+                            'surrounding_score', 
+                            'within_score', 
+                            'surrounding_score:within_score')) %>% 
+  arrange(term) %>% 
+  pivot_longer(2:ncol(.), names_to = 'model', values_to = 'coef') %>% 
+  mutate(model = fct_relevel(model, 
+                             'rate_mixef_nonspatial', 'rate_fixef_sar',
+                             'prop_nonres_mixef_nonspatial', 'prop_nonres_fixef_sar',
+                             'prop_late_mixef_nonspatial', 'prop_late_fixef_sar'),
+         var = case_when(str_detect(model, 'rate') ~ 'rate',
+                         str_detect(model, 'prop_nonres') ~ 'prop_nonres',
+                         str_detect(model, 'prop_late') ~ 'prop_late'),
+         model = case_when(str_detect(model, 'mixef') ~ 'mixef_nonspatial',
+                           str_detect(model, 'fixef') ~ 'fixef_spatial')) %>% 
+  mutate(var = fct_relevel(var, 'rate', 'prop_nonres', 'prop_late')) %>% 
+  arrange(model) %>% 
+  pivot_wider(names_from = model, values_from = coef) %>% 
+  arrange(var) %>% 
+  select(-var) %>% 
+  select(term, mixef_nonspatial, fixef_spatial)
+
+
+```
+
+```{r display_robustness_check}
+
+# now I want to create a formatted table
+
+all_robustness_df  %>% 
+  kable(booktabs = TRUE,
+        caption = paste('Robustness check of policy coefficients'),
+        col.names = c(' ', 'Mixed-effect nonspatial model (`nlme`)', 'Fixed-effect SAR model (`spatialreg`)'),
+        align = c('l', 'c', 'c')) %>% 
+  pack_rows('Abortion rate', 1, 3) %>%
+  pack_rows('Nonresident share of abortions', 4, 6) %>% 
+  pack_rows('Later-term share of abortions', 7, 9) %>% 
+  column_spec(1, width = "20em") %>%
+  column_spec(2:3, width = '8em') %>% 
+  row_spec(c(1, 3, 4, 6, 7, 9), bold = T, color = "black", background = "lightyellow")
+
+```
+
 
