@@ -1,0 +1,4 @@
+# [`model-helpers`](model-helpers)
+
+- [`model_helper_lme.R`](model-helpers/model_helper_lme.R): This script uses the `nlme` package to fit spatial and nonspatial mixed-effects models for the three outcome variables. It also contains the code for various functions that I will call in the [`models.Rmd`](models.Rmd) script. Running this script will fit all `nlme` models.
+- [`model_helper_spatialreg.R`](model-helpers/model_helper_spatialreg.R): This script contains functions to fit various forms of spatial and nonspatial fixed-effects models with the `spatialreg` package. Due to run time concerns, this script alone will not fit the `spatialreg` models. The [`models.Rmd`](models.Rmd) script calls the model functions written within this script. 
