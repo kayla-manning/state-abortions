@@ -48,14 +48,14 @@ knitr::opts_chunk$set(message = FALSE,
 {
   # reading in gestational data that I scraped (with granular windows)
 
-  gestation <- read_csv('raw-data/scraped/gestational_combined.csv') %>% 
+  gestation <- read_csv('data-creation/raw-data/scraped/gestational_combined.csv') %>% 
     # select(-X1) %>% 
     distinct() %>% 
     mutate(state = ifelse(state == 'New York State', 'New York', state))
   
   # reading in the raw policy data
   
-  policies <- read_csv('raw-data/clean_policies.csv')
+  policies <- read_csv('data-creation/raw-data/clean_policies.csv')
   
   # looping through the different excel sheets to get the abortion count data (I
   # want the raw, uncleaned data so I can see which setates have "**" next to
@@ -64,7 +64,7 @@ knitr::opts_chunk$set(message = FALSE,
   {
     abortion_counts <- tibble()
     for (y in 2010:2019) {
-      storage <- read_excel('raw-data/downloads/abortions_2010-2019.xls', 
+      storage <- read_excel('data-creation/raw-data/downloads/abortions_2010-2019.xls', 
                             skip = 1, sheet = as.character(y)) %>% 
         select(-1) %>% 
         clean_names() %>% 
@@ -86,7 +86,7 @@ knitr::opts_chunk$set(message = FALSE,
 # to make this df (and I wrote this csv in the final_df chunk), so things will
 # be redundant
 
-combined <- read_csv('raw-data/combined_data.csv') %>% 
+combined <- read_csv('data-creation/raw-data/combined_data.csv') %>% 
   mutate(within_between = fct_relevel(within_between,
                                      'low-low', 'low-med', 'low-high', 
                                      'med-low', 'med-med', 'med-high', 
@@ -187,7 +187,7 @@ missing_state_yr_table %>%
 # reading in data that lists the state-year observations that did not report any
 # gestation data
 
-nonreport_gestation <- read_excel('raw-data/helper/nonreport_gestation.xlsx')
+nonreport_gestation <- read_excel('data-creation/raw-data/helper/nonreport_gestation.xlsx')
 
 # WY is excluded from every year except 2007 and 2019... what is the difference
 # between NA and 0? it's because WY only reported for <=8 but had negligible

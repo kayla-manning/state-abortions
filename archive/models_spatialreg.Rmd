@@ -1,0 +1,422 @@
+---
+title: Model Fitting on Abortion Rates
+output: html_document
+---
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      message = FALSE)
+
+# calling helper file that reads in all packages, data, and homemade functions
+
+source('model_helper_spatialreg.R')
+
+# loading packages & map data here since that's not specifically for modeling &
+# this may move to another script eventually
+
+{
+  library(maps)
+  states <- map_data('state')
+  map_df <- usa@data %>% 
+    mutate(NAME_1 = str_to_lower(NAME_1)) %>% 
+    inner_join(states, by = c('NAME_1' = 'region'))
+}
+
+```
+
+## Testing for Spatial Autocorrelation
+
+```{r global_morans}
+
+# creating a list object to store moran tests in
+
+{
+  weights_list <- list(weights.contig.W, weights.inv.dist, weights.inv.dist2)
+  outcome_list <- list(usa@data$abortion_per_1k_births,
+                       usa@data$ie_ratio,
+                       usa@data$late_to_early)
+  moran_list <- list()
+  i <- 1
+  
+  # iterating through and storing as a list
+  for (outcome in outcome_list) {
+    for (weight in weights_list) {
+      moran_list[[i]] <- moran.mc(outcome,
+                                  listw = weight,
+                                  nsim = 9999,
+                                  alternative = 'two.sided')
+      i <- i + 1
+    }
+  }
+}
+
+
+do.call(rbind, lapply(moran_list, tidy)) %>% 
+  mutate(var = rep(c('rate', 'ie', 'late_early'), each = 3),
+         neighbors = rep(c('contig', 'invdist', 'invdist2'), times = 3)) %>% 
+  select(neighbors, statistic, p.value) %>% 
+  kable(booktabs = TRUE,
+        col.names = c('Neighborhoods', 'I-statistic', 'p-value'),
+        caption = "Moran's I-test on outcome variables") %>% 
+  pack_rows('Abortion rates', 1, 3) %>% 
+  pack_rows('Import-export ratio', 4, 6) %>% 
+  pack_rows('Late-early ratio', 7, 9)
+
+
+```
+
+```{r distributions}
+
+# I want to plot all of the dependent variables & their respective
+# transformations to Gaussian
+
+{
+  # this requires some data manipulation, which I'm doing below
+  
+  untransformed <- usa@data %>% 
+    mutate(ie_ratio = imports/abortions) %>%
+    select(abortion_per_1k_births,
+           ie_ratio,
+           late_to_early) %>% 
+    pivot_longer(everything()) %>% 
+    mutate(transformed = FALSE,
+           transformation = case_when(name == 'abortion_per_1k_births' ~ 'sqrt(x)',
+                                      name == 'ie_ratio' ~ 'log(x)',
+                                      name == 'late_to_early' ~ 'sqrt(x)')) 
+  
+  graph_df <- untransformed %>% 
+    mutate(value = case_when(name == 'abortion_per_1k_births' ~ sqrt(value),
+                                      name == 'ie_ratio' ~ log(value),
+                                      name == 'late_to_early' ~ sqrt(value)),
+           transformed = TRUE) %>% 
+    bind_rows(untransformed) %>% 
+    mutate(transformation = ifelse(transformed, transformation, 'untransformed')) 
+  
+  # creating a list of plots in a loop to streamline the code
+  
+  plots <- list()
+  dep_vars <- c('abortion_per_1k_births', 'ie_ratio', 'late_to_early')
+  for (i in 1:length(dep_vars)) {
+    plots[[i]] <- graph_df %>% 
+      filter(name == dep_vars[i]) %>% 
+      mutate(transformation = fct_relevel(transformation, 'untransformed')) %>% 
+      ggplot(aes(value)) +
+      geom_histogram() +
+      facet_wrap(~transformation, scales = 'free') +
+      labs(title = dep_vars[[i]], x = '', y = '') +
+      theme_minimal()
+  }
+  
+  # printing out the plots
+  
+  ggarrange(plots[[1]], plots[[2]], plots[[3]]) %>% 
+    annotate_figure(left = textGrob('Count', rot = 90, vjust = 1),
+                    bottom = textGrob('Value'),
+                    top = text_grob('Dependent variables as approximately Gaussian distributions', 
+                                    size = 16)) 
+
+}
+
+# plot to justify including year as a factor rather than linear term in the models
+
+usa@data %>% 
+  select(year, abortion_per_1k_births, ie_ratio, 
+         nonres_res_ratio, late_to_early) %>% 
+  pivot_longer(2:ncol(.), names_to = 'variable') %>% 
+  group_by(year, variable) %>% 
+  summarise(avg_rate = mean(value), 
+            .groups = 'drop') %>% 
+  ggplot(aes(year, avg_rate)) +
+  geom_point() +
+  geom_line() +
+  facet_wrap(~variable, scales = 'free_y') + 
+  theme_minimal() +
+  labs(title = 'Non-linear nature of year across variables') +
+  scale_x_continuous(breaks = 2010:2019)
+
+```
+
+```{r maps}
+
+# producing 2010 vs 2019 plots for each of our 3 response variables
+
+p1 <- map_df %>% 
+  filter(year %in% c(2010, 2019)) %>% 
+  ggplot() +
+  geom_polygon(aes(long, lat, group = group, fill = abortion_per_1k_births),
+               color = 'black') +
+  scale_fill_gradient2(high = 'red3') +
+  coord_fixed() +
+  facet_wrap(~year) +
+  labs(title = 'Abortions per 1k births',
+       fill = '') +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+# IE ratio
+
+p2 <- map_df %>% 
+  filter(year %in% c(2010, 2019)) %>% 
+  ggplot() +
+  geom_polygon(aes(long, lat, group = group, fill = ie_ratio),
+               color = 'black') +
+  scale_fill_gradient2(high = 'red3') +
+  coord_fixed() +
+  facet_wrap(~year) +
+  labs(title = 'Import-export ratio',
+       fill = '') +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+# late-early ratio
+
+p3 <- map_df %>% 
+  filter(year %in% c(2010, 2019)) %>% 
+  ggplot() +
+  geom_polygon(aes(long, lat, group = group, fill = late_to_early),
+               color = 'black') +
+  scale_fill_gradient2(high = 'red3') +
+  coord_fixed() +
+  facet_wrap(~year) +
+  labs(title = 'Late-early ratio',
+       fill = '') +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+# putting plots together
+
+ggarrange(p1, p2, p3, nrow = 3) %>% 
+  annotate_figure(top = text_grob('Spatial structure in outcome variables', 
+                                  size = 14))
+
+```
+
+## Examining models
+
+```{r analyzing_spatial_dependence}
+
+# lagrange multplier diagnostics (score tests) for spatial dependence suggest
+# that there is not lagged spatial dependence, but there is in the errors
+
+lm.LMtests(rates_inv_dist[[2]][[1]], 
+           listw=weights.inv.dist, 
+           test="all")
+
+# same for IE (not lagged dependence)
+
+lm.LMtests(ie_inv_dist[[2]][[1]], 
+           listw=weights.inv.dist, 
+           test="all")
+
+# robust regression finds insignificant lag, but everything else is significant
+
+lm.LMtests(late_early_inv_dist[[2]][[1]], 
+           listw=weights.inv.dist, 
+           test="all")
+
+
+```
+
+```{r model_comparison}
+
+# getting df ready for model comparison
+
+comparison_df <- mutate(get_model_comparisons(rates_inv_dist, rates_inv_dist2, rates_contig), var = 'rate') %>% 
+  bind_rows(mutate(get_model_comparisons(ie_inv_dist, ie_inv_dist2, ie_contig), var = 'ie')) %>% 
+  bind_rows(mutate(get_model_comparisons(late_early_inv_dist, late_early_inv_dist2, late_early_contig),
+                   var = 'late-early')) %>% 
+  mutate(var = fct_relevel(var, 'rate', 'ie', 'late-early')) %>%
+    select(var, method, 
+           AIC_inv_dist, AIC_inv_dist2, AIC_contig,
+           BIC_inv_dist, BIC_inv_dist2, BIC_contig,
+           logLik_inv_dist, logLik_inv_dist2, logLik_contig) %>% 
+    arrange(var, AIC_inv_dist2) %>% 
+  select(-var)
+
+# producing a formatted table
+
+{
+  comparison_df %>% 
+    mutate(across(where(is.numeric), function(x) round(x, 1))) %>% 
+    kable(booktabs = TRUE,
+          col.names = c('Method', 
+                        rep(c('Inverse distance', 
+                              'Inverse distance squared',
+                              'Contiguous'),
+                            times = 3)),
+          align=c(rep('c', times = 10))) %>% 
+    pack_rows('Abortion Rates (abortions per 1k live births)', 1, 4) %>% 
+    pack_rows('Import-Export Ratio', 5, 8) %>% 
+    pack_rows('Late-Early Ratio', 9, 12) %>% 
+    add_header_above(header = c(' ' = 1, 
+                                'AIC for neighborhood specification' = 3,
+                                'BIC for neighborhood specification' = 3,
+                                'Log-likelihood for neighborhood specification' = 3)) %>% 
+    row_spec(c(1, 5, 9), bold = T, color = "black", background = "lightyellow") %>% 
+    column_spec(1:10, width = "18em") %>% 
+    column_spec(seq(1, 10, by = 3), border_right = T)
+}
+
+```
+
+```{r assigning_models}
+
+# adding our chosen model objects to the environment under easy-to-reference
+# names
+
+rate_sar <- rates_inv_dist[[2]][3][[1]]
+ie_sar <- ie_inv_dist2[[2]][3][[1]]
+late_early_sar <- late_early_inv_dist[[2]][3][[1]]
+
+```
+
+```{r display_all_coefs}
+
+# getting column names for kable output... need to do it like this so I can get
+# the names to cover multiple lines
+
+names_spaced <- c(
+  'Variable',
+  'Rate model: Change in the square root of abortion rates (abortions per 1k births)',
+  'IE model: Multiplicative change in import-export ratio',
+  'Late-early model: Change in the square root of the late-early ratio'
+  )
+
+big_coef_df <- mutate(get_summary_df(rate_sar), dep = 'rate') %>% 
+  bind_rows(mutate(get_summary_df(ie_sar), dep = 'ie'),
+            mutate(get_summary_df(late_early_sar), dep = 'late-early')) %>% 
+  mutate(ci = ifelse(dep != 'ie',
+                     paste0('(', round(estimate-qnorm(0.975)*std_error, 3), 
+                            ', ', round(estimate+qnorm(0.975)*std_error, 3), ')'),
+                     paste0('(', round(exp(estimate-qnorm(0.975)*std_error), 3), 
+                            ', ', round(exp(estimate+qnorm(0.975)*std_error), 3), ')')),
+         estimate = ifelse(dep == 'ie', exp(estimate), estimate),
+         estimate = round(estimate, 3)) %>% 
+  mutate(estimate = ifelse(pr_z < 0.05, paste0(estimate, '*'), estimate),
+         pr_z = round(pr_z, 3),
+         estimate = paste(estimate, ci)) %>% 
+  select(term, estimate, dep) %>% 
+  pivot_wider(names_from = dep, values_from = estimate) %>% 
+  mutate(term = str_remove_all(term, 'within_between')) %>% 
+  mutate(term = str_remove_all(term, fixed('as.factor(year)'))) %>% 
+  mutate(term = fct_relevel(term,
+                            '(Intercept)',
+                            'surrounding_score', 
+                            'within_score', 
+                            'surrounding_score:within_score',
+                            'abortions', 'dem_2party', 'hh_income', 'pct_bachelors',
+                            'prop_hisp', 'prop_nonwhite', 'total_population')) %>% 
+  arrange(term)
+
+big_coef_df %>% 
+  kable(booktabs = TRUE,
+        #format = 'latex',
+        col.names = names_spaced,
+        caption = 'SAR model coefficients') %>% 
+  pack_rows('Policy environment', 2, 4) %>%
+  pack_rows('Control variables', 5, 10) %>%
+  pack_rows('Year', 11, 19) %>%
+  column_spec(1:4, width = "10em") %>% 
+  row_spec(c(2, 4), bold = T, color = "black", background = "lightyellow")
+
+```
+
+```{r count_models}
+
+# ** NEED TO TRY TO GET THESE AS SPATIAL MODELS **
+# https://cran.r-project.org/web/packages/glmmfields/vignettes/spatial-glms.html
+
+########
+
+# I know the rate of later-term increases, but what about the absolute number?
+# insignificant INCREASE (still!)
+
+test_late <- MASS::glm.nb(post13 ~  surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + 
+                            as.factor(year) + total_population,
+    data = usa@data)
+summary(test_late)
+plot(test_late)
+
+# early (insignficant decrease)
+
+test_early <- MASS::glm.nb(pre13 ~  surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + 
+                            as.factor(year) + total_population,
+    data = usa@data)
+summary(test_early)
+plot(test_early)
+
+# doing same thing but for imports (SIGNIFICANT INCREASE)
+
+test_nonres <- MASS::glm.nb(imports ~  surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + 
+                            as.factor(year) + total_population,
+    data = usa@data)
+summary(test_nonres)
+plot(test_nonres)
+
+# now looking at absolute count of abortions
+
+test_total <- MASS::glm.nb(abortions ~  surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem2party + 
+                            as.factor(year) + total_population,
+    data = usa@data)
+summary(test_total)
+plot(test_total)
+
+```
+
+```{r moran_resids}
+
+# doing the same thing but with the model residuals
+
+residual_morans <- lapply(list(rate_sar, ie_sar, late_early_sar), 
+                          function (x) moran.mc(residuals(x), 
+                                                weights.inv.dist,
+                                                alternative = 'two.sided',
+                                                nsim = 999))
+
+do.call(rbind, lapply(residual_morans, tidy)) %>% 
+  mutate(var = c('rate', 'ie', 'late_early')) %>% 
+  select(var, statistic, p.value) %>% 
+  kable(booktabs = TRUE,
+        caption = "Moran's I-test on SAR model residuals")
+
+states <- map_data('state')
+
+for (y in 2010:2019) {
+  p <- usa@data %>% 
+    mutate(rate_resids = residuals(rate_sar),
+           ie_resids = residuals(ie_sar),
+           late_early_resids = residuals(late_early_sar),
+           NAME_1 = str_to_lower(NAME_1)) %>% 
+    inner_join(states, by = c('NAME_1' = 'region')) %>%
+    filter(year == y) %>% 
+    ggplot() +
+    geom_polygon(aes(long, lat, group=group, fill = rate_resids),
+                 color = 'black') +
+    facet_wrap(~year) +
+    coord_fixed() +
+    labs(title = "Model residuals") +
+    theme(panel.background = element_blank(),
+          axis.text = element_blank(),
+          axis.line = element_blank(),
+          axis.ticks = element_blank(),
+          axis.title = element_blank())
+  print(p)
+}
+
+```
+

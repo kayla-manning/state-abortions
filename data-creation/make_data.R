@@ -37,7 +37,7 @@
   {
     # reading in gestational data that I scraped
     
-    gestation <- read_csv('raw-data/scraped/gestational_combined.csv') %>% 
+    gestation <- read_csv('data-creation/raw-data/scraped/gestational_combined.csv') %>% 
       # select(-X1) %>% 
       distinct() %>% 
       mutate(state = ifelse(state == 'New York State', 'New York', state))
@@ -47,7 +47,7 @@
     {
       abortion_counts <- tibble()
       for (y in 2010:2019) {
-        storage <- read_excel('raw-data/downloads/abortions_2010-2019.xls', 
+        storage <- read_excel('data-creation/raw-data/downloads/abortions_2010-2019.xls', 
                               skip = 1, sheet = as.character(y)) %>% 
           select(-1) %>% 
           clean_names() %>% 
@@ -60,24 +60,24 @@
     
     # reading in the birth & policy data
     
-    births <- read.delim('raw-data/downloads/births_2007-2020.txt') %>% 
+    births <- read.delim('data-creation/raw-data/downloads/births_2007-2020.txt') %>% 
       clean_names() %>% 
       select(-c(notes, state_code, year_code))
-    policy_scores <- read_csv('raw-data/policy_scores.csv')
+    policy_scores <- read_csv('data-creation/raw-data/policy_scores.csv')
     
     # presidential data for a control variable
     
-    prez <- read_csv('raw-data/downloads/presidential_votes.csv')
+    prez <- read_csv('data-creation/raw-data/downloads/presidential_votes.csv')
     
     # household income for a control variable
     
-    income <- read_excel('raw-data/downloads/household_income.xlsx', skip = 7) %>% 
+    income <- read_excel('data-creation/raw-data/downloads/household_income.xlsx', skip = 7) %>% 
       clean_names()
     
     # state Guttmacher estimates (obtained through their Abortion Provider
     # Census) that isn't available through the CDC
     
-    path <- 'raw-data/downloads/state_abortions_2014_2016_2017.pdf'
+    path <- 'data-creation/raw-data/downloads/state_abortions_2014_2016_2017.pdf'
     test <- extract_tables(path)
     
     extra_abortions <- as.data.frame(do.call(rbind, test)) %>% 
@@ -282,7 +282,7 @@
   {
     # presidential data for a control variable
     
-    prez <- read_csv('raw-data/downloads/presidential_votes.csv') %>% 
+    prez <- read_csv('data-creation/raw-data/downloads/presidential_votes.csv') %>% 
       filter(!writein) %>% 
       filter(party_simplified %in% c('DEMOCRAT', 'REPUBLICAN')) %>% 
       select(year, state, party_simplified, candidatevotes) %>% 
@@ -297,7 +297,7 @@
     # (2013)
     
     
-    income <- read_excel('raw-data/downloads/household_income.xlsx', skip = 7) %>% 
+    income <- read_excel('data-creation/raw-data/downloads/household_income.xlsx', skip = 7) %>% 
       clean_names() %>% 
       select(state, seq(2, ncol(.), by = 2)) %>% 
       slice(-1) %>% 
@@ -315,7 +315,7 @@
     
     # education for % with bachelor's degree
     
-    pct_bachelors <- read_excel('raw-data/downloads/bachelors-degree-holders-per-25-44-year-olds.xlsx', 
+    pct_bachelors <- read_excel('data-creation/raw-data/downloads/bachelors-degree-holders-per-25-44-year-olds.xlsx', 
                                 skip = 2) %>% 
       clean_names() %>% 
       select(x1, 
@@ -331,7 +331,7 @@
     # origin==0 is total Hispanic+non-Hispanic
     
     {
-      hisp_or_white <- read_csv('raw-data/downloads/state_race_ethnicity.csv') %>% 
+      hisp_or_white <- read_csv('data-creation/raw-data/downloads/state_race_ethnicity.csv') %>% 
         clean_names() %>% 
         filter(sex == 0,
                (origin == 2 | race == 1)) %>% 
@@ -400,5 +400,5 @@
   
   # writing to a csv for easy analysis
   
-  write_csv(final_df, 'raw-data/combined_data.csv')
+  write_csv(final_df, 'data-creation/raw-data/combined_data.csv')
 }

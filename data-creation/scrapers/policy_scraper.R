@@ -140,7 +140,7 @@
   
   for (y in 2006:2016) {
     
-    filepath <- paste0('raw-data/policy_archives/laws_', y, '.pdf')
+    filepath <- paste0('data-creation/raw-data/policy_archives/laws_', y, '.pdf')
     
     # adjusting coordinates because the alignment of the pdf files varies slightly
     # by year (can see what coordinates I need by running locate_areas())
@@ -381,5 +381,5 @@
 # I want the data in my environment. I'm leaving this code in the script so I
 # remember to overwrite the CSV if/when I make changes or corrections
 
-write.csv(policy_df, 'raw-data/scraped/scraped_policies.csv')
+write.csv(policy_df, 'data-creation/raw-data/scraped/scraped_policies.csv')
 

@@ -10,7 +10,7 @@
 
 # reading policies from the saved csv
 
-policy_df <- read_csv('raw-data/scraped/scraped_policies.csv')
+policy_df <- read_csv('data-creation/raw-data/scraped/scraped_policies.csv')
 
 # getting info on the different levels for each variable
 
@@ -64,7 +64,7 @@ clean_policies <- clean %>%
   left_join(score_key, by = c('policy', 'level')) %>% 
   mutate(score = case_when(level %in% c('0', 'Enjoined') ~ 0,
                            TRUE ~ score)) 
-write_csv(clean_policies, 'raw-data/clean_policies.csv')
+write_csv(clean_policies, 'data-creation/raw-data/clean_policies.csv')
 
 # seeing how many unique levels there are of each policy
 
@@ -119,7 +119,7 @@ dist_df <- dist_matrix %>%
 # want the policies to be a factor of inverse distance & population...
 # normalized to mean of 0 and sd of 1
 
-pops <- read_csv('raw-data/downloads/statepops2010_2019.csv') %>% 
+pops <- read_csv('data-creation/raw-data/downloads/statepops2010_2019.csv') %>% 
   clean_names() %>% 
   select(name, popestimate2010:popestimate2019) %>% 
   rename(state = name) %>% 
@@ -177,5 +177,5 @@ all_scores %>%
 
 # saving this df
 
-write_csv(all_scores, 'raw-data/policy_scores.csv')
+write_csv(all_scores, 'data-creation/raw-data/policy_scores.csv')
 
