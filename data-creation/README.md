@@ -1,4 +1,4 @@
-# Files used to create datasets for the analysis
+# [`data-creation`](data-creation)
 
 - [`make_data.R`](make_data.R): This script joins the abortion data, state policies, and control variables into a single dataframe under [`raw-data/combined_data.csv`](raw-data/combined-data.csv). This dataset is what is used in most of the exploratory data analysis, and it will be used for modeling.
 - [`policy_scorer.R`](policy_scraper.R): This script converts the scraped policy data in [`cleaned_policies.csv`](raw-data/cleaned_policies.csv) into the scores contained in [`policy_scores.csv`](raw-data/policy_scores.csv).

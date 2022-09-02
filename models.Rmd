@@ -22,6 +22,37 @@ knitr::opts_chunk$set(echo = TRUE,
   rate_mod <- fitted_models$rate$raw$best_mod
   prop_nonres_mod <- fitted_models$prop_nonres$raw$best_mod
   prop_late_mod <- fitted_models$prop_late$raw$best_mod
+  
+  # fitting addition models with nonres/late as rates of births (and other
+  # models that might be useful)
+  
+  {
+
+    # will replace nonresident share with overall nonresident rate
+    
+    rate_nonres_mod <- lme(log(imports / births) ~ surrounding_score * within_score + pct_bachelors + 
+                              prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population,
+                          data = usa@data,
+                          random = ~ 1 | year,
+                          control=lmeControl(opt = 'optim'))
+    
+    rate_res_mod <- lme(sqrt(res / births) ~ surrounding_score * within_score + pct_bachelors + 
+                              prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population,
+                          data = usa@data,
+                          random = ~ 1 | year,
+                          control=lmeControl(opt = 'optim'))
+    
+    rate_late_mod <- lme(sqrt(post13 / births) ~ surrounding_score * within_score + pct_bachelors + 
+                              prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population,
+                          data = usa@data,
+                          random = ~ 1 | year,
+                          control=lmeControl(opt = 'optim'))
+    rate_early_mod <- lme(sqrt(pre13 / births) ~ surrounding_score * within_score + pct_bachelors + 
+                              prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population,
+                          data = usa@data,
+                          random = ~ 1 | year,
+                          control=lmeControl(opt = 'optim'))
+  }
 }
 
 # loading packages & map data here since that's not specifically for modeling &
@@ -337,6 +368,78 @@ big_coef_df %>%
 
 ```
 
+```{r extra_coefs}
+
+extra_coefs <- mutate(get_lme_summary_df(rate_mod), dep = 'rate') %>% 
+  bind_rows(mutate(get_lme_summary_df(prop_nonres_mod), dep = 'nonres_share'),
+            mutate(get_lme_summary_df(rate_late_mod), dep = 'late_rate'),
+            mutate(get_lme_summary_df(rate_early_mod), dep = 'early_rate'),
+            mutate(get_lme_summary_df(prop_late_mod), dep = 'late_share'),
+            mutate(get_lme_summary_df(rate_nonres_mod), dep = 'nonres_rate'),
+            mutate(get_lme_summary_df(rate_res_mod), dep = 'res_rate'))
+
+# formatting output in a table
+
+extra_coefs %>% 
+  mutate(ci = paste0('(', round(value-qnorm(0.975)*std_error, 3), 
+                     ', ', round(value+qnorm(0.975)*std_error, 3), ')'),
+         value = round(value, 3)) %>% 
+  mutate(value = ifelse(p_value < 0.05, paste0(value, '*'), value),
+         pr_z = round(p_value, 3),
+         value = paste(value, ci)) %>% 
+  select(term, value, dep) %>% 
+  pivot_wider(names_from = dep, values_from = value) %>% 
+  mutate(term = str_remove_all(term, 'within_between')) %>% 
+  mutate(term = fct_relevel(term,
+                            '(Intercept)',
+                            'surrounding_score', 
+                            'within_score', 
+                            'surrounding_score:within_score',
+                            'abortions', 'dem_2party', 'hh_income', 'pct_bachelors',
+                            'prop_hisp', 'prop_nonwhite')) %>% 
+  arrange(term) %>% 
+  kable(booktabs = TRUE,
+        #format = 'latex',
+        # col.names = names_spaced,
+        caption = 'Fixed Effects Coefficients for Linear Mixed-Effects Models',
+        align = c('l', rep('c', times = 3))) %>% 
+  pack_rows('Policy environment', 2, 4) %>%
+  pack_rows('Control variables', 5, 10) %>% 
+  column_spec(1:8, width = "30em") %>% 
+  row_spec(c(2, 4), bold = T, color = "black", background = "lightyellow")
+
+# I want to try to visualize coefficients... writing a function to do so
+
+compare_coefs <- function(outcome) {
+  extra_coefs %>% 
+    mutate(dep_type = case_when(str_detect(dep, 'rate') ~ 'rate',
+                                str_detect(dep, 'share') ~ 'share'),
+           dep = str_remove_all(str_remove_all(dep, '_rate'), '_share')) %>% 
+    filter(str_detect(term, 'score'),
+           dep == outcome) %>%
+    ggplot(aes(value, term, color = p_value<0.05)) +
+    geom_point() +
+    geom_errorbarh(aes(xmin = value - qnorm(0.975)*std_error,
+                       xmax = value + qnorm(0.975)*std_error)) +
+    geom_vline(xintercept = 0,
+               color = 'red',
+               linetype = 'dotted') +
+    facet_wrap(vars(dep_type),
+               nrow = 2) +
+    labs(title = outcome)
+}
+
+compare_coefs('late')
+compare_coefs('early')
+compare_coefs('nonres')
+
+combined %>% 
+  ggplot(aes(within_score, births/total_population)) +
+  geom_point() +
+  geom_smooth()
+
+```
+
 ```{r temporal_effects}
 
 # creating function to get year random effects from model
@@ -346,7 +449,7 @@ get_yr_random <- function(mod) {
     as.data.frame() %>% 
     rownames_to_column('year') %>% 
     rename(intercept = `(Intercept)`) %>% 
-    select(year, intercept)
+    select(year, intercept, surrounding_score)
 }
 
 # doing this for my 3 models & displaying values together
@@ -357,7 +460,7 @@ temporal_df <- mutate(get_yr_random(rate_mod), mod = 'rate') %>%
 temporal_df %>% 
   select(-mod) %>% 
   kable(booktabs = TRUE,
-        col.names = c('Year', 'Intercept'),
+        col.names = c('Year', 'Intercept', 'Surrounding Score'),
         caption = 'Random Effects of Year on the Outcome Variables') %>% 
   column_spec(1:2, width = "8em") %>% 
   pack_rows('Abortion Rate', 1, 10) %>% 
@@ -394,60 +497,107 @@ temporal_df %>%
 
 ```{r fitting_count_models}
 
-# writing function to get qqplot
-
-get_qq <- function(mod) {
-  qqnorm(residuals(mod))
-  qqline(residuals(mod))
-}
-
 library(lme4)
 
 # interaction term is significant and positive for late count... that means more
-# hostile --> greater increase in count of later term
+# hostile --> greater increase in count of later term (insignificant INCREASE
+# for surroundings)
 
 test_late <- glmer.nb(post13 ~ surrounding_score * within_score + pct_bachelors + 
            prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population +
-           (1 | year),
+           offset(log(births)) + (1 | year),
            data = usa@data)
-summary(test_late)
 
-# model diagnostics (see
-# https://stats.stackexchange.com/questions/70558/diagnostic-plots-for-count-regression
-# for descriptions & more examples)
+# fewer abortions, but insignificant (significant positive interaction term
+# though)
 
-plot(fitted(test_late), residuals(test_late),
-     xlim = c(0, 1000))
-get_qq(test_late)
-anova(test_late, test = 'Chisq')
-deviance(test_late)/test_late$df.residual
+test_abortions <- glmer.nb(abortions ~ surrounding_score * within_score + pct_bachelors + 
+           prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population +
+           offset(log(births)) + (1 | year),
+           data = usa@data,
+           control=glmerControl(optimizer="bobyqa",
+                               optCtrl=list(maxfun=2e10)))
 
 # doing same thing to see what happens to early count
 
 test_early <- glmer.nb(pre13 ~ surrounding_score * within_score + pct_bachelors + 
            prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population +
-           (1 | year),
+           offset(log(births)) + (1 | year),
            data = usa@data,
            control=glmerControl(optimizer="bobyqa",
                                optCtrl=list(maxfun=2e10)))
-summary(test_early)
-plot(fitted(test_early), residuals(test_early),
-     xlim = c(0, 50000))
-plot(fitted(test_early), residuals(test_early))
-get_qq(test_early)
 
 # and nonresident counts
 
 test_nonres <- glmer.nb(imports ~ surrounding_score * within_score + pct_bachelors + 
            prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population +
-           (1 | year),
+           offset(log(births)) + (1 | year),
            data = usa@data,
            control=glmerControl(optimizer="bobyqa",
                                optCtrl=list(maxfun=2e10)))
-summary(test_nonres)
-get_qq(test_nonres)
+
+get_nbinom_summary_df <- function (mod) {
+  data.frame(summary(mod)$coefficients) %>%
+    clean_names() %>% 
+    mutate(across(where(is.numeric), function(x) round(x, 5))) %>% 
+    mutate(estimate = ifelse(pr_z < 0.05, 
+                             paste0(estimate, fixed('*')), 
+                             estimate)) %>% 
+    rownames_to_column('term') %>% 
+    filter(str_detect(term, 'score')) %>% 
+    select(term, estimate)
+}
+
+mutate(get_nbinom_summary_df(test_nonres), mod = 'nonres') %>% 
+  bind_rows(mutate(get_nbinom_summary_df(test_late), mod = 'late')) %>% 
+  bind_rows(mutate(get_nbinom_summary_df(test_early), mod = 'early')) %>% 
+  bind_rows(mutate(get_nbinom_summary_df(test_abortions), mod = 'abortions')) %>% 
+  pivot_wider(names_from = mod, values_from = estimate)
 
 ```
+
+```{r count_diagnostics}
+
+# writing functions to get diagnostic plots
+{
+  # cook's distances for influential points (>1)
+  get_cooks <- function(mod) {
+    plot(cooks.distance(mod),
+         type="h", lwd=2,
+         xlab="Observation index",
+         ylab="Cook's distances",
+         main="Cook's distances")
+    abline(h=1,lty=2,col="red")
+  }
+  
+  # deviance residuals vs. fitted for lack of fit (don't want a pattern here)
+  get_resid <- function(mod) {
+    plot(log(fitted(mod)), residuals(mod, type = 'deviance'),
+         xlab = 'Natural log of the fitted values',
+         ylab = 'Deviance residuals',
+         main = 'Residuals vs. fitted')
+    abline(0, 0, col = 'red')
+  }
+  
+  # putting the plots side-by-side
+  get_nbin_plots <- function(mod) {
+    par(mfrow = c(1, 2),
+        oma=c(0, 0, 2, 0))
+    get_resid(mod)
+    get_cooks(mod)
+    title(paste(deparse(substitute(mod)), 'diagnostics'), side = 3, outer = TRUE)
+  }
+}
+
+for (mod in list(test_nonres, test_late, test_early, test_abortions)) {
+  get_nbin_plots(mod)
+}
+
+test_resids <- DHARMa::simulateResiduals(test_nonres)
+plot(test_resids)
+
+```
+
 
 ## Model diagnostics
 
@@ -551,7 +701,11 @@ for (y in 2010:2019) {
 
 # generating diagnostic plots for each model
 
-models <- list(rate_mod, prop_nonres_mod, prop_late_mod)
+models <- list(rate_mod, prop_nonres_mod, prop_late_mod, early_rate_mod)
+outcome_vars <- c('abortion rates',
+                  'nonresident share of abortions',
+                  'later-term share of abortions',
+                  'earlier-term share of abortions')
 plots <- list()
 for (i in 1:length(models)) {
   

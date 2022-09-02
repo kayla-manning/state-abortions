@@ -26,8 +26,7 @@
   # variables so I can interpret as increase/decrease in 1 std. dev)
   
   standardize <- function(x) {(x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)}
-  nonspatial_df <- read_csv('raw-data/combined_data.csv') %>% 
-    mutate(hh_income = hh_income) %>% 
+  nonspatial_df <- read_csv('data-creation/raw-data/combined_data.csv') %>% 
     mutate(across(c(within_score, surrounding_score, hh_income, pct_bachelors, 
                     prop_hisp, prop_nonwhite, hh_income, dem_2party, total_population), 
                   standardize)) %>% 

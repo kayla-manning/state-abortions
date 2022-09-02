@@ -214,6 +214,16 @@
                   .groups = 'drop') %>% 
         distinct()
       
+      # getting number of abortions occurred by residents of X state in X state
+      
+      res <- abortion_long %>% 
+        filter(state_location == state_residence,
+               !str_detect(state_residence, 'Total')) %>% 
+        group_by(state_residence, year) %>% 
+        summarize(res = sum(count, na.rm = TRUE),
+                  .groups = 'drop') %>% 
+        distinct()
+      
       # computing import/export ratio for each state & year, with import and export
       # defined above... need to exclude CO from 2018 because it does not have any
       # exports reported
@@ -221,6 +231,8 @@
       nonres_df <- inner_join(imports, exports, 
                           by = c('state_location' = 'state_residence', 
                                  'year')) %>% 
+        inner_join(res, by = c('state_location' = 'state_residence', 
+                               'year')) %>% 
         filter(exports != 0) %>%
         mutate(ie_ratio = imports / exports) %>% 
         filter(!state_location %in% c('Hawaii', 'Alaska', 'District of Columbia'),
@@ -250,10 +262,9 @@
       late_early_df <- gestation %>% 
         filter(!state %in% c('Hawaii', 'Alaska', 'District of Columbia'),
                !is.na(x0_13)) %>% 
-        mutate(post13 = total_reported - x0_13,
-               prop_late = post13 / total_reported) %>% 
+        mutate(post13 = total_reported - x0_13) %>% 
         rename(pre13 = x0_13) %>% 
-        select(state, year, prop_late, pre13, post13) 
+        select(state, year, pre13, post13) 
       
     }
   }
@@ -266,9 +277,9 @@
     
     dep_var_df <- inner_join(ie_df, abortion_rates, by = c('state_location', 'year')) %>% 
       inner_join(late_early_df, by = c('state_location' = 'state', 'year')) %>% 
-      mutate(late_to_early = post13 / pre13,
-             prop_nonres = (imports / abortions)+1e-10) %>% 
-      inner_join(nonres_res_df, by = c('state_location', 'year'))
+      mutate(prop_late = post13 / abortions,
+             prop_nonres = (imports / abortions)) %>% 
+      inner_join(nonres_df, by = c('state_location', 'year'))
     
   }
 }
