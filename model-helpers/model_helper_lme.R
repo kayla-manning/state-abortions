@@ -69,12 +69,13 @@
 {
   # creating list of variables to iterate through
   
-  outcome_vars <- c('rate', 'prop_nonres', 'prop_late')
+  outcome_vars <- c('rate', 'rate_nonres', 'rate_res',
+                    'rate_late', 'rate_early', 'prop_late')
   fitted_models <- list()
   
   for (var in outcome_vars) {
     
-    # fitting models for each of the response variables
+    # fitting models for each of the rate response variables
     
     if (var == 'rate') {
       
@@ -83,9 +84,32 @@
       
     }
     
-    if (var == 'prop_nonres') {
+    if (var == 'rate_nonres') {
       
-      raw_f <- as.formula(log(prop_nonres) ~ surrounding_score * within_score + pct_bachelors + 
+      raw_f <- as.formula(log(rate_nonres) ~ surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
+      
+    }
+    
+    if (var == 'rate_res') {
+      
+      raw_f <- as.formula(sqrt(rate_res) ~ surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
+      
+    }
+    
+    # model formulas for abortion timing
+    
+    if (var == 'rate_late') {
+      
+      raw_f <- as.formula(sqrt(rate_late) ~ surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
+      
+    }
+    
+    if (var == 'rate_early') {
+      
+      raw_f <- as.formula(sqrt(rate_early) ~ surrounding_score * within_score + pct_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }

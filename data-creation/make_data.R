@@ -275,11 +275,14 @@
     # a fudge factor to nonresident abortion rates since we can't take the log
     # of 0)
     
-    dep_var_df <- inner_join(ie_df, abortion_rates, by = c('state_location', 'year')) %>% 
+    dep_var_df <- inner_join(nonres_df, abortion_rates, by = c('state_location', 'year')) %>% 
       inner_join(late_early_df, by = c('state_location' = 'state', 'year')) %>% 
       mutate(prop_late = post13 / abortions,
-             prop_nonres = (imports / abortions)) %>% 
-      inner_join(nonres_df, by = c('state_location', 'year'))
+             rate_late = post13 / (births / 1000),
+             rate_early = pre13 / (births / 1000),
+             prop_nonres = imports / abortions,
+             rate_nonres = imports / (births / 1000),
+             rate_res = res / (births / 1000)) 
     
   }
 }

@@ -27,7 +27,7 @@
   # variables so I can interpret as increase/decrease in 1 std. dev)
   
   standardize <- function(x) {(x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)}
-  nonspatial_df <- read_csv('raw-data/combined_data.csv') %>% 
+  nonspatial_df <- read_csv('data-creation/raw-data/combined_data.csv') %>% 
     mutate(hh_income = hh_income / 1000) %>% 
     mutate(across(c(within_score, surrounding_score, hh_income, pct_bachelors, 
                     prop_hisp, prop_nonwhite, hh_income, dem_2party, total_population), 
@@ -78,29 +78,49 @@
 {
   make_models <- function(weights_matrix, var = 'rate') {
     
-    # fitting models for each of the response variables
+    # fitting models for each of the rate response variables
     
     if (var == 'rate') {
       
       raw_f <- as.formula(sqrt(abortion_per_1k_births) ~ surrounding_score * within_score + pct_bachelors + 
-                            prop_hisp + prop_nonwhite + hh_income + dem_2party + 
-                            as.factor(year) + total_population)
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }
     
-    if (var == 'prop_nonres') {
-
-      raw_f <- as.formula(log(prop_nonres) ~ surrounding_score * within_score + pct_bachelors + 
-                            prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + 
-                            total_population)
+    if (var == 'rate_nonres') {
+      
+      raw_f <- as.formula(log(rate_nonres) ~ surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
+      
+    }
+    
+    if (var == 'rate_res') {
+      
+      raw_f <- as.formula(sqrt(rate_res) ~ surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
+      
+    }
+    
+    # model formulas for abortion timing
+    
+    if (var == 'rate_late') {
+      
+      raw_f <- as.formula(sqrt(rate_late) ~ surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
+      
+    }
+    
+    if (var == 'rate_early') {
+      
+      raw_f <- as.formula(sqrt(rate_early) ~ surrounding_score * within_score + pct_bachelors + 
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }
     
     if (var == 'prop_late') {
       
       raw_f <- as.formula(sqrt(prop_late) ~ surrounding_score * within_score + pct_bachelors + 
-                            prop_hisp + prop_nonwhite + hh_income + dem_2party + as.factor(year) + 
-                            total_population)
+                            prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }
     
@@ -198,7 +218,7 @@
     # (it takes forever) & can just read it in directly
     
     #write.nb.gal(usa_contig, 'raw-data/helper/usa_contig_nb.gal')
-    usa_contig <- read.gal('raw-data/helper/usa_contig_nb.gal')
+    usa_contig <- read.gal('data-creation/raw-data/helper/usa_contig_nb.gal')
     
     # check for symmetric relationships (since if TX is a neighbor of OK, OK should
     # also be a neighbor of TX)
@@ -251,17 +271,43 @@
     rates_contig <- make_models(weights.contig.W, 'rate')
   }
   
-  # IE models
+  # res/nonres models
   {
-    prop_nonres_inv_dist <- make_models(weights.inv.dist, 'prop_nonres')
-    prop_nonres_inv_dist2 <- make_models(weights.inv.dist2, 'prop_nonres')
-    prop_nonres_contig <- make_models(weights.contig.W, 'prop_nonres')
+    
+    # nonres first
+    
+    rate_nonres_inv_dist <- make_models(weights.inv.dist, 'rate_nonres')
+    rate_nonres_inv_dist2 <- make_models(weights.inv.dist2, 'rate_nonres')
+    rate_nonres_contig <- make_models(weights.contig.W, 'rate_nonres')
+    
+    # now res
+    
+    rate_res_inv_dist <- make_models(weights.inv.dist, 'rate_res')
+    rate_res_inv_dist2 <- make_models(weights.inv.dist2, 'rate_res')
+    rate_res_contig <- make_models(weights.contig.W, 'rate_res')
+    
   }
   
-  # late-early models
+  # timing models
   {
+    
+    # late rate 
+    
+    rate_late_inv_dist <- make_models(weights.inv.dist, 'rate_late')
+    rate_late_inv_dist2 <- make_models(weights.inv.dist2, 'rate_late')
+    rate_late_contig <- make_models(weights.contig.W, 'rate_late')
+    
+    # early rate
+    
+    rate_early_inv_dist <- make_models(weights.inv.dist, 'rate_early')
+    rate_early_inv_dist2 <- make_models(weights.inv.dist2, 'rate_early')
+    rate_early_contig <- make_models(weights.contig.W, 'rate_early')
+    
+    # late share
+    
     prop_late_inv_dist <- make_models(weights.inv.dist, 'prop_late')
     prop_late_inv_dist2 <- make_models(weights.inv.dist2, 'prop_late')
     prop_late_contig <- make_models(weights.contig.W, 'prop_late')
+    
   }
 }

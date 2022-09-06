@@ -92,7 +92,6 @@ combined <- read_csv('data-creation/raw-data/combined_data.csv') %>%
   
 ```
 
-
 # Data
 
 ## Limitations
@@ -396,6 +395,58 @@ combined %>%
 
 ```
 
+```{r score_maps}
+
+# getting data prepared for a map
+
+{
+  library(maps)
+  states <- map_data('state')
+  map_df <- combined %>% 
+    mutate(state = str_to_lower(state)) %>% 
+    inner_join(states, by = c('state' = 'region'))
+}
+
+# visualizing policy scores on a map
+
+p1 <- map_df %>% 
+  filter(year %in% c(2010, 2019)) %>% 
+  ggplot() +
+  geom_polygon(aes(long, lat, group = group, fill = within_score),
+               color = 'black') +
+  scale_fill_gradient2(high = 'red3') +
+  coord_fixed() +
+  facet_wrap(~year) +
+  labs(title = 'Within-state policy scores',
+       fill = '') +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+p2 <- map_df %>% 
+  filter(year %in% c(2010, 2019)) %>% 
+  ggplot() +
+  geom_polygon(aes(long, lat, group = group, fill = surrounding_score),
+               color = 'black') +
+  scale_fill_gradient2(high = 'red3') +
+  coord_fixed() +
+  facet_wrap(~year) +
+  labs(title = 'Surrounding-state policy scores',
+       fill = '') +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+ggarrange(p1, p2,
+          nrow = 2)
+
+```
+
+
 ```{r category_df}
 
 # getting a table that has the cutoffs
@@ -569,27 +620,35 @@ combined %>%
 
 ```
 
-### Nonresident share of abortions
+### Nonresident / resident abortion rates
 
-```{r nonres_share}
+```{r nonres_and_res_rate}
 
 # taking a look at the histogram... incredibly skewed
 
 combined %>% 
-  ggplot(aes(prop_nonres)) +
+  ggplot(aes(rate_nonres)) +
     geom_histogram() +
-    labs(title = 'Nonresident share of abortions') +
+    labs(title = 'Nonresident abortion rate') +
     theme_minimal()
 
-# getting extreme values
+# getting extreme values for nonresidents
 
 combined %>% 
-  drop_na(prop_nonres) %>% 
-  filter(prop_nonres %in% c(min(prop_nonres), max(prop_nonres)))
+  drop_na(rate_nonres) %>% 
+  filter(rate_nonres %in% c(min(rate_nonres), max(rate_nonres))) %>% 
+  select(state, year, rate_nonres)
+
+# doing the same for residents
+
+combined %>% 
+  drop_na(rate_res) %>% 
+  filter(rate_res %in% c(min(rate_res), max(rate_res))) %>% 
+  select(state, year, rate_res)
 
 ```
 
-### Later-term abortions
+### Later-term / earlier-term abortion rates
 
 ```{r late_vs_early}
 
@@ -601,11 +660,26 @@ combined %>%
   labs(title = 'Distribution of later-term share of abortions') +
   theme_minimal()
 
-# getting extreme values
+# getting later-term rate extreme values
+
+combined %>% 
+  drop_na(rate_late) %>% 
+  filter(rate_late %in% c(min(rate_late), max(rate_late))) %>% 
+  select(state, year, rate_late)
+
+# getting earlier-term rate extreme values
+
+combined %>% 
+  drop_na(rate_early) %>% 
+  filter(rate_early %in% c(min(rate_early), max(rate_early))) %>% 
+  select(state, year, rate_early)
+
+# getting later-term share extreme values
 
 combined %>% 
   drop_na(prop_late) %>% 
-  filter(prop_late %in% c(min(prop_late), max(prop_late)))
+  filter(prop_late %in% c(min(prop_late), max(prop_late))) %>% 
+  select(state, year, prop_late)
 
 ```
 
@@ -614,15 +688,18 @@ combined %>%
 # getting simple correlation between all of the variables
 
 combined %>% 
-  select(prop_nonres, prop_late, abortion_per_1k_births, 
+  select(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
+         abortion_per_1k_births, 
          abortion_per_100k_pop) %>% 
   cor(use = 'complete.obs') %>% 
   kable(booktabs = TRUE,
         caption = 'Bivariate correlations between dependent variables')
 combined %>% 
-  select(prop_nonres, prop_late, abortion_per_1k_births, 
+  select(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
+         abortion_per_1k_births, 
          abortion_per_100k_pop) %>% 
-  filter_at(vars(prop_nonres, prop_late, abortion_per_1k_births, 
+  filter_at(vars(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
+         abortion_per_1k_births, 
          abortion_per_100k_pop), 
          all_vars(!is.na(.))) %>% 
   cor() %>% 
@@ -632,8 +709,9 @@ combined %>%
 # generating histograms of all of the distributions
 
 combined %>% 
-  select(ie_ratio, late_to_early, abortion_per_1k_births, 
-         abortion_per_100k_pop, nonres_res_ratio)%>% 
+  select(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
+         abortion_per_1k_births, 
+         abortion_per_100k_pop)%>% 
   pivot_longer(everything()) %>% 
   ggplot(aes(value)) +
   geom_histogram() +
