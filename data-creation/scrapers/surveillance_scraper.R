@@ -26,7 +26,6 @@
   
   gs4_deauth()
   
-  
   gestational_range <- tibble()
   for (y in 2007:2019) {
     
@@ -51,7 +50,7 @@
       
       # fixing column names for 2019 good cols because the ranges are slightly different
       
-      if (y == 2019) {
+      if (y %in% 2018:2019) {
         good_cols <- c('x1', 'x6', 'x7_9', 'x10_13', 'x14_15', 'x16_17', 
                        'x18_20', 'x21', 'total_reported')
       }
@@ -68,7 +67,10 @@
       
       # renaming the total column
       
-      if (length(colnames(this_yr_df)) == 15) {
+      if (y == 2018) {
+        this_yr_df <- rename(this_yr_df, total_reported = x9)
+      }
+      else if (length(colnames(this_yr_df)) == 15) {
         colnames(this_yr_df)[14] <- 'total_reported'
       }
       else if (y == 2006) {
@@ -95,7 +97,7 @@
       # in a pdf... also note that the weekly cut-offs are different)
       
       remove_cols <- sapply(2:6, function(x) paste0('x_', x))
-      range_2017 <- as.data.frame(extract_tables('raw-data/downloads/gestational_2017.pdf', 
+      range_2017 <- as.data.frame(extract_tables('data-creation/raw-data/downloads/gestational_2017.pdf', 
                                                  pages = 1)[[1]]) %>% 
         slice(-1) %>% 
         row_to_names(1) %>% 
@@ -116,30 +118,33 @@
     
     # adding that year's data to the big df
     
-    if (y != 2019) {
+    if (!y %in% 2018:2019) {
       gestational_range <- bind_rows(gestational_range, this_yr_df)
     }
     
     # need to figure out something to do with 2019 data
     
     else {
-      range_2019 <- this_yr_df %>% 
-        mutate(across(everything(), function(x) str_remove_all(x, '\\s*\\([^\\)]+\\)'))) %>% 
-        mutate(across(x6:year, parse_number))
+      assign(paste0('range_', y),
+             this_yr_df %>% 
+               mutate(across(everything(), function(x) str_remove_all(x, '\\s*\\([^\\)]+\\)'))) %>% 
+               mutate(across(x6:year, parse_number))
+             ) 
     }
   }
   
   
   # now cleaning the big dataframe
-  
+
   test <- gestational_range %>% 
     mutate(across(everything(), function(x) str_remove_all(x, '\\s*\\([^\\)]+\\)'))) %>% 
-    mutate(across(x8:year, parse_number))
+    mutate(across(x8:year, parse_number)) %>% 
+    distinct()
   
   # previewing the separate dataframes before I combine them
   
   head(test)
-  head(bind_rows(range_2017, range_2019))
+  head(bind_rows(range_2017, range_2018, range_2019))
   
   # will combine first 13 weeks for the big dataframe
   # we can remove symbols from all state names... the only year with duplicates is
@@ -148,19 +153,28 @@
   
   all_combined <- test %>% 
     mutate(x0_13 = x8+x9_13) %>% 
-    select(-c(x8, x9_13)) %>% 
+    select(-c(x8, x9_13)) %>%
     select(state, x0_13, everything()) %>% 
     bind_rows(
-      bind_rows(range_2017, range_2019) %>% 
-        mutate(x0_13 = x6 + x7_9 + x10_13) %>% 
+      bind_rows(range_2017, range_2018, range_2019) %>% 
+        
+        # if a state reports between 1-4 abortions for 10-13 window but they
+        # have good data for the other windows, I'm just going to replace the NA
+        # value with 3 (2.5 is expected value but abortion counts are integers)
+        # so that I don't lose an observation
+        
+        mutate(x10_13 = ifelse(!is.na(x6) & !is.na(x7_9) & is.na(x10_13), 
+                               3, x10_13),
+               x0_13 = x6 + x7_9 + x10_13) %>% 
         select(-c(x6, x7_9, x10_13)) %>% 
         select(state, x0_13, everything())
     ) %>% 
-    mutate(state = str_replace_all(state, '[^a-z A-Z 0-9]', ''))
+    mutate(state = str_replace_all(state, '[^a-z A-Z 0-9]', '')) %>% 
+    distinct()
 }
 
 #############################################
 ### saving CSV
 #############################################
 
-write.csv(all_combined, 'raw-data/scraped/gestational_combined.csv')
+write.csv(all_combined, 'data-creation/raw-data/scraped/gestational_combined.csv')

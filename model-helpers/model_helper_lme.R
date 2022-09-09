@@ -27,7 +27,7 @@
   
   standardize <- function(x) {(x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)}
   nonspatial_df <- read_csv('data-creation/raw-data/combined_data.csv') %>% 
-    mutate(across(c(within_score, surrounding_score, hh_income, pct_bachelors, 
+    mutate(across(c(within_score, surrounding_score, hh_income, prop_bachelors, 
                     prop_hisp, prop_nonwhite, hh_income, dem_2party, total_population), 
                   standardize)) %>% 
     inner_join(
@@ -40,9 +40,9 @@
   # getting df that drops observations with NA in predictors/outcomes
   
   nonspatial_df <- nonspatial_df %>%
-    drop_na(abortions, births, within_score, surrounding_score,
-            pct_bachelors, total_population, prop_hisp, prop_nonwhite,
-            hh_income, dem_2party)
+    drop_na(within_score, surrounding_score, prop_bachelors, total_population, 
+            prop_hisp, prop_nonwhite, hh_income, dem_2party, abortion_per_1k_births, 
+            rate_nonres, rate_res, rate_late, rate_early, prop_late)
   
   # joining nonspatial data with spatial data
   {
@@ -57,6 +57,10 @@
     usa <- merge(usa, nonspatial_df,
                  by.x = 'NAME_1', by.y = 'state',
                  duplicateGeoms = TRUE, all.x = FALSE)
+    
+    # making sure I don't end up with duplicates anywhere
+    
+    usa@data <- distinct(usa@data)
     
   }
   
@@ -79,46 +83,46 @@
     
     if (var == 'rate') {
       
-      raw_f <- as.formula(sqrt(abortion_per_1k_births) ~ surrounding_score * within_score + pct_bachelors + 
+      raw_f <- as.formula(sqrt(abortion_per_1k_births) ~ surrounding_score * within_score + prop_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }
     
     if (var == 'rate_nonres') {
       
-      raw_f <- as.formula(log(rate_nonres) ~ surrounding_score * within_score + pct_bachelors + 
+      raw_f <- as.formula(log(rate_nonres) ~ surrounding_score * within_score + prop_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }
     
     if (var == 'rate_res') {
       
-      raw_f <- as.formula(sqrt(rate_res) ~ surrounding_score * within_score + pct_bachelors + 
+      raw_f <- as.formula(sqrt(rate_res) ~ surrounding_score * within_score + prop_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }
     
     # model formulas for abortion timing
-    
+
     if (var == 'rate_late') {
-      
-      raw_f <- as.formula(sqrt(rate_late) ~ surrounding_score * within_score + pct_bachelors + 
+
+      raw_f <- as.formula(sqrt(rate_late) ~ surrounding_score * within_score + prop_bachelors +
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
-      
+
     }
     
     if (var == 'rate_early') {
       
-      raw_f <- as.formula(sqrt(rate_early) ~ surrounding_score * within_score + pct_bachelors + 
+      raw_f <- as.formula(sqrt(rate_early) ~ surrounding_score * within_score + prop_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }
-    
+
     if (var == 'prop_late') {
-      
-      raw_f <- as.formula(sqrt(prop_late) ~ surrounding_score * within_score + pct_bachelors + 
+
+      raw_f <- as.formula(sqrt(prop_late) ~ surrounding_score * within_score + prop_bachelors +
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
-      
+
     }
     
     # creating list of spatial structures so I can fit models in a loop
@@ -146,7 +150,9 @@
       nonspatial <- lme(formulas[[i]], 
                         data = usa@data,
                         random = ~ 1 | year,
-                        control=lmeControl(opt = 'optim'))
+                        control = lmeControl(maxIter = 1e100,
+                                             singular.ok = TRUE, 
+                                             opt = 'optim'))
       mods <- list(nonspatial)
       
       # adding spatial structure
@@ -198,5 +204,13 @@
   names(fitted_models) <- outcome_vars
 }
 
+# adding our chosen model objects to the environment under easy-to-reference
+# names
 
+rate_mod <- fitted_models$rate$raw$best_mod
+rate_nonres_mod <- fitted_models$rate_nonres$raw$best_mod
+rate_res_mod <- fitted_models$rate_res$raw$best_mod
+rate_late_mod <- fitted_models$rate_late$raw$best_mod
+rate_early_mod <- fitted_models$rate_early$raw$best_mod
+prop_late_mod <- fitted_models$prop_late$raw$best_mod
   

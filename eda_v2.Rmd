@@ -89,6 +89,16 @@ combined <- read_csv('data-creation/raw-data/combined_data.csv') %>%
                                      'low-low', 'low-med', 'low-high', 
                                      'med-low', 'med-med', 'med-high', 
                                      'high-low', 'high-med', 'high-high'))
+
+# getting data prepared for a map
+
+{
+  library(maps)
+  states <- map_data('state')
+  map_df <- combined %>% 
+    mutate(state = str_to_lower(state)) %>% 
+    inner_join(states, by = c('state' = 'region'))
+}
   
 ```
 
@@ -186,15 +196,6 @@ missing_state_yr_table %>%
 
 nonreport_gestation <- read_excel('data-creation/raw-data/helper/nonreport_gestation.xlsx')
 
-# WY is excluded from every year except 2007 and 2019... what is the difference
-# between NA and 0? it's because WY only reported for <=8 but had negligible
-# counts for 9-13 and 14-15... for this reason I may just exclude WY from
-# gestational calculations since the unknowns are split across pre- and post-13
-# weeks
-
-gestation %>% 
-  filter(state == 'Wyoming')
-
 # getting states that are only missing certain years & states that are missing
 # all years (for future reference when comparing different subsets of
 # missingness)
@@ -227,67 +228,116 @@ nonreport_gestation %>%
 
 ```
 
+```{r make_missing_tables}
+
+# first I'm getting state-year observations that do not report gestational
+# data... this may include states that also fail to report abortion count data
+
+data_by_nonreport_gestation <- combined %>% 
+  right_join(nonreport_gestation, by = c('state' = 'state', 'year')) %>% 
+  filter(is.na(pre13)) %>% 
+  mutate(nonreport_gestation = TRUE)
+
+# now I'm getting data & coding state-year observations for (a) whether the
+# STATE is missing some gestational data FOR ANY YEAR in the timeframe (rather
+# than state-year observation), (b) whether a state-year observation is missing
+# abortion counts for that year, or (c) if a state is not missing any
+# gestational data across any of the years OR abortion count data for that given
+# year
+
+data_by_missingness <- combined %>% 
+  left_join(gestation, by = c('state', 'year')) %>% 
+  full_join(data_by_nonreport_gestation) %>% 
+  mutate(nonreport = case_when(is.na(abortion_per_1k_births) ~ 'nonreport_abortions',
+                               nonreport_gestation ~ 'nonreport_gestation',
+                               TRUE ~ 'report_all')) %>% 
+  mutate(nonreport = ifelse(nonreport != 'report_all', T, F)) %>% 
+  filter(!state %in% c('District of Columbia', 'Hawaii', 'Alaska'),
+         !str_detect(state, 'Total')) %>% 
+  select(-c(state:births, abortion_per_100k_pop:post13, 
+            within_between, x0_13:nonreport_gestation))
+
+missing_balance_check <-  data_by_missingness %>% 
+  group_by(nonreport) %>% 
+  summarise_all(function(x) mean(x, na.rm = TRUE)) %>% 
+  pivot_longer(2:ncol(.), names_to = 'statistic', values_to = 'mean') %>% 
+  filter(statistic != '...1') 
+
+# getting list of states in each category
+
+state_nonreport_cats <- combined %>% 
+  distinct() %>% 
+  mutate(report_all = !is.na(abortion_per_1k_births) & !is.na(rate_late))
+
+# making a map that is shaded by the percentage of years in which it reports
+
+state_nonreport_cats %>% 
+  group_by(state) %>% 
+  summarize(report_years = sum(report_all)) %>% 
+  mutate(state = str_to_lower(state),
+         years_reporting = case_when(report_years == 10 ~ 'All',
+                             report_years == 0 ~ 'None',
+                             TRUE ~ 'Some')) %>% 
+  inner_join(states, by = c('state' = 'region')) %>%
+  ggplot() +
+  geom_polygon(aes(long, lat, group = group, fill = years_reporting),
+               color = 'black') +
+  scale_fill_manual(breaks = c('All', 'Some', 'None'),
+                    values = c('red3', 'indianred1', 'ivory4')) +
+  coord_fixed() +
+  labs(title = 'CDC reporting status',
+       fill = 'Years reported, \n2010-2019') +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+# getting a table with the number of observations in each category
+
+combined %>% 
+  left_join(gestation, by = c('state' = 'state', 'year')) %>% 
+  full_join(data_by_nonreport_gestation) %>% 
+  mutate(nonreport = !(!is.na(abortion_per_1k_births) & !is.na(rate_late))) %>% 
+  select(state, year, nonreport) %>% 
+  filter(!state %in% c('District of Columbia', 'Hawaii', 'Alaska'),
+         !str_detect(state, 'Total')) %>%
+  distinct() %>% 
+  group_by(nonreport) %>% 
+  count() %>% 
+  mutate(nonreport = case_when(nonreport ~ 'Yes',
+                               !nonreport ~ 'No')) %>% 
+  kable(booktabs = TRUE,
+        caption = 'Number of observations in each missingness category',
+        col.names = c('Missing CDC data', 'Number of observations')) 
+
+```
+
 ```{r missing_balance}
 
 # comparing sample statistics for missing/non-missing groups & viewing alongside
 # missing abortion
 
 options(scipen = 999)
-data_by_nonreport_gestation <- combined %>% 
-  inner_join(nonreport_gestation, by = c('state' = 'state', 'year')) %>% 
-  mutate(nonreport_gestation = TRUE)
-data_by_missingness <- combined %>% 
-  full_join(gestation, by = c('state' = 'state', 'year')) %>% 
-  full_join(data_by_nonreport_gestation) %>% 
-  mutate(nonreport_gestation = state %in% missing_some_gestation,
-         nonreport_abortions = is.na(total_reported),
-         nonreport = case_when(nonreport_abortions ~ 'nonreport_abortions',
-                               nonreport_gestation & !nonreport_abortions ~ 'nonreport_gestation',
-                               TRUE ~ 'report_all')) %>% 
-  filter(!state %in% c('District of Columbia', 'Hawaii', 'Alaska'),
-         !str_detect(state, 'Total')) %>% 
-  select(-c(state:nonres_res_ratio, within_between, x0_13:nonreport_abortions))
-missing_balance_check <-  data_by_missingness %>% 
-  group_by(nonreport) %>% 
-  summarise_all(function(x) mean(x, na.rm = TRUE)) %>% 
-  pivot_longer(2:ncol(.), names_to = 'statistic', values_to = 'average') %>% 
-  filter(statistic != '...1') 
 
-# getting list of states in each category
-
-state_nonreport_cats <- combined %>% 
-  full_join(gestation, by = c('state' = 'state', 'year')) %>% 
-  full_join(data_by_nonreport_gestation) %>% 
-  mutate(nonreport_gestation = state %in% missing_some_gestation,
-         nonreport_abortions = is.na(total_reported),
-         nonreport = case_when(nonreport_abortions ~ 'nonreport_abortions',
-                               nonreport_gestation & !nonreport_abortions ~ 'nonreport_gestation',
-                               TRUE ~ 'report_all')) %>% 
-  select(state, nonreport) %>% 
-  filter(!state %in% c('District of Columbia', 'Hawaii', 'Alaska'),
-         !str_detect(state, 'Total')) %>% 
-  distinct() %>% 
-  group_by(nonreport) %>% 
-  nest()
-
-get_state_list <- function (x) {
-  paste(state_nonreport_cats$data[state_nonreport_cats$nonreport == x][[1]]$state,
-        collapse = ', ')
-}
-tibble(report_all = get_state_list('report_all'),
-       nonreport_abortions = get_state_list('nonreport_abortions'),
-       nonreport_gestation = get_state_list('nonreport_gestation')) %>% 
-  kable(booktabs = TRUE)
-
-# visualizing metrics by category
+# balance check for control variables
 
 missing_balance_check %>% 
-  ggplot(aes(nonreport, average)) +
+  filter(!statistic %in% c('abortion_per_1k_births',
+                           'rate_nonres',
+                           'rate_res',
+                           'rate_late',
+                           'rate_early',
+                           'prop_late',
+                           'prop_nonres'),
+         !str_detect(statistic, 'score')) %>% 
+  ggplot(aes(nonreport, mean)) +
   geom_col() +
   facet_wrap(~statistic, scales = 'free') +
   coord_flip() +
-  labs(title = 'Examining missingness categories',
-       subtitle = 'Mean value for each variable within each category') +
+  labs(title = 'Examining control variables of missingness categories',
+       subtitle = 'Median value for each variable within each category', 
+       x = '') +
   theme_minimal()
 
 # printing out a table with the mean values for each group and p-value for
@@ -295,27 +345,51 @@ missing_balance_check %>%
 
 options(scipen = 999)
 missing_balance_check %>% 
-  pivot_wider(names_from = nonreport, values_from = average) %>% 
-  mutate(pvalue = c(tidy(aov(within_score ~ nonreport, 
+  mutate(nonreport = ifelse(nonreport, 'Nonreporting', 'Reporting')) %>% 
+  pivot_wider(names_from = nonreport, values_from = mean) %>% 
+  filter(!statistic %in% c('abortion_per_1k_births',
+                           'rate_nonres',
+                           'rate_res',
+                           'rate_late',
+                           'rate_early',
+                           'prop_late',
+                           'prop_nonres')) %>% 
+  mutate(pvalue = c(tidy(t.test(within_score ~ nonreport, 
                              data = data_by_missingness))$p.value[1],
-                    tidy(aov(surrounding_score ~ nonreport, 
+                    tidy(t.test(surrounding_score ~ nonreport, 
                              data = data_by_missingness))$p.value[1],
-                    tidy(aov(dem_2party ~ nonreport, 
+                    tidy(t.test(dem_2party ~ nonreport, 
                              data = data_by_missingness))$p.value[1],
-                    tidy(aov(hh_income ~ nonreport, 
+                    tidy(t.test(hh_income ~ nonreport, 
                              data = data_by_missingness))$p.value[1],
-                    tidy(aov(pct_bachelors ~ nonreport, 
+                    tidy(t.test(prop_bachelors ~ nonreport, 
                              data = data_by_missingness))$p.value[1],
-                    tidy(aov(total_population ~ nonreport, 
+                    tidy(t.test(total_population ~ nonreport, 
                              data = data_by_missingness))$p.value[1],
-                    tidy(aov(prop_hisp ~ nonreport, 
+                    tidy(t.test(prop_hisp ~ nonreport, 
                              data = data_by_missingness))$p.value[1],
-                    tidy(aov(prop_nonwhite ~ nonreport, 
+                    tidy(t.test(prop_nonwhite ~ nonreport, 
                              data = data_by_missingness))$p.value[1])) %>% 
-  mutate(across(nonreport_abortions:report_all, function(x) round(x, 3))) %>% 
-  arrange(desc(pvalue)) %>% 
+  mutate(across(is.numeric, function(x) ifelse(x < 100, round(x, 3), round(x, 0)))) %>% 
+  mutate(statistic = fct_relevel(statistic, 'within_score', 'surrounding_score')) %>% 
+  arrange(statistic, desc(pvalue)) %>% 
   kable(booktabs = TRUE,
-        caption = 'Comparing state-year observations with and without missing data')
+        caption = 'Two-sided t-test for difference in means',
+        col.names = c(' ', 'Reporting', 'Nonreporting', 'p-value'),
+        escape = FALSE) %>% 
+  pack_rows('Policy scores', 1, 2) %>% 
+  pack_rows('Control variables', 3, 8) %>% 
+  column_spec(2:4, '8em') %>%
+  add_header_above(c(' ' = 1, 'CDC Reporting Status' = 2, ' ' = 1))
+
+# maybe I just want to do p-value between report all or missing
+
+aov_df <- data_by_missingness %>% 
+  mutate(nonreport = ifelse(nonreport != 'report_all', T, F))
+
+aov_df %>% 
+  group_by(nonreport) %>% 
+  mutate()
 
 ```
 
@@ -391,26 +465,16 @@ combined %>%
   ggplot(aes(surrounding_score)) +
   geom_histogram() +
   theme_minimal() +
-  labs(title = 'Interstate policy scores')
+  labs(title = 'Surrounding-state policy scores')
 
 ```
 
 ```{r score_maps}
 
-# getting data prepared for a map
-
-{
-  library(maps)
-  states <- map_data('state')
-  map_df <- combined %>% 
-    mutate(state = str_to_lower(state)) %>% 
-    inner_join(states, by = c('state' = 'region'))
-}
-
 # visualizing policy scores on a map
 
 p1 <- map_df %>% 
-  filter(year %in% c(2010, 2019)) %>% 
+  filter(year %in% c(2010, 2019)) %>%
   ggplot() +
   geom_polygon(aes(long, lat, group = group, fill = within_score),
                color = 'black') +
@@ -426,13 +490,13 @@ p1 <- map_df %>%
         axis.title = element_blank())
 
 p2 <- map_df %>% 
-  filter(year %in% c(2010, 2019)) %>% 
+  filter(year %in% c(2010, 2019)) %>%
   ggplot() +
   geom_polygon(aes(long, lat, group = group, fill = surrounding_score),
                color = 'black') +
   scale_fill_gradient2(high = 'red3') +
   coord_fixed() +
-  facet_wrap(~year) +
+  facet_wrap(~year, nrow=2) +
   labs(title = 'Surrounding-state policy scores',
        fill = '') +
   theme(panel.background = element_blank(),
@@ -445,7 +509,6 @@ ggarrange(p1, p2,
           nrow = 2)
 
 ```
-
 
 ```{r category_df}
 
@@ -579,8 +642,6 @@ combined %>%
 
 ## Dependent variables
 
-### Abortion rates
-
 ```{r rates}
 
 # visualizing abortion rates per population & births... highly correlated. for
@@ -620,8 +681,6 @@ combined %>%
 
 ```
 
-### Nonresident / resident abortion rates
-
 ```{r nonres_and_res_rate}
 
 # taking a look at the histogram... incredibly skewed
@@ -647,8 +706,6 @@ combined %>%
   select(state, year, rate_res)
 
 ```
-
-### Later-term / earlier-term abortion rates
 
 ```{r late_vs_early}
 

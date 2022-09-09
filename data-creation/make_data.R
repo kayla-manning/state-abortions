@@ -35,12 +35,14 @@
   # reading in the data <3
   
   {
-    # reading in gestational data that I scraped
+    # reading in gestational data that I scraped in
+    # `data-creation/raw-data/scrapers/surveillance_scraper.R`
     
     gestation <- read_csv('data-creation/raw-data/scraped/gestational_combined.csv') %>% 
       # select(-X1) %>% 
       distinct() %>% 
-      mutate(state = ifelse(state == 'New York State', 'New York', state))
+      mutate(state = ifelse(state == 'New York State', 'New York', state)) %>% 
+      filter(year %in% 2010:2019)
     
     # looping through the different excel sheets to get the abortion count data
     
@@ -190,53 +192,42 @@
 {
   # getting the individual dependent variables
   {
-    # import-export ratio
+    # resident & nonresident counts
     {
-      # getting number of non-resident abortions obtained within X state (i.e.
-      # abortions imported from other states)
-      
-      imports <- abortion_long %>% 
-        filter(state_location != state_residence,
-               !str_detect(state_residence, 'Total')) %>% 
-        group_by(state_location, year) %>% 
-        summarize(imports = sum(count, na.rm = TRUE),
-                  .groups = 'drop') %>% 
-        distinct()
-      
-      # getting number of abortions obtained by residents of X state in OTHER states
-      # (i.e. abortions exported to other states)
-      
-      exports <- abortion_long %>% 
-        filter(state_location != state_residence,
-               !str_detect(state_residence, 'Total')) %>% 
-        group_by(state_residence, year) %>% 
-        summarize(exports = sum(count, na.rm = TRUE),
-                  .groups = 'drop') %>% 
-        distinct()
       
       # getting number of abortions occurred by residents of X state in X state
       
       res <- abortion_long %>% 
         filter(state_location == state_residence,
                !str_detect(state_residence, 'Total')) %>% 
-        group_by(state_residence, year) %>% 
+        group_by(state_location, year) %>% 
         summarize(res = sum(count, na.rm = TRUE),
                   .groups = 'drop') %>% 
         distinct()
       
-      # computing import/export ratio for each state & year, with import and export
-      # defined above... need to exclude CO from 2018 because it does not have any
-      # exports reported
+      # getting number of non-resident abortions obtained within X state (i.e.
+      # abortions imported from other states... I want the difference between
+      # 'Total by location of service' and resident abortions since counts of
+      # less than 4 aren't denoted in the actual cells
       
-      nonres_df <- inner_join(imports, exports, 
-                          by = c('state_location' = 'state_residence', 
-                                 'year')) %>% 
-        inner_join(res, by = c('state_location' = 'state_residence', 
-                               'year')) %>% 
-        filter(exports != 0) %>%
-        mutate(ie_ratio = imports / exports) %>% 
-        filter(!state_location %in% c('Hawaii', 'Alaska', 'District of Columbia'),
-               imports != 0)
+      nonres_df <- abortion_long %>% 
+        filter(str_detect(state_residence, 'Total')) %>% 
+        rename(total = count) %>% 
+        inner_join(res, by = c('state_location', 'year')) %>% 
+        mutate(nonres = total - res) %>% 
+        select(state_location, year, res, nonres) %>% 
+        distinct()
+      
+      # # getting number of abortions obtained by residents of X state in OTHER states
+      # # (i.e. abortions exported to other states)
+      # 
+      # exports <- abortion_long %>% 
+      #   filter(state_location != state_residence,
+      #          !str_detect(state_residence, 'Total')) %>% 
+      #   group_by(state_residence, year) %>% 
+      #   summarize(exports = sum(count, na.rm = TRUE),
+      #             .groups = 'drop') %>% 
+      #   distinct()
     }
     
     # abortions per 1000 births
@@ -245,11 +236,15 @@
         inner_join(births, by = c('state_location' = 'state', 'year')) %>% 
         group_by(state_location, year, count, births, total_population) %>% 
         filter(str_detect(state_residence, 'Total')) %>% 
+        full_join(gestation, by = c('state_location' = 'state', 'year')) %>% 
+        mutate(count = ifelse(is.na(count), total_reported, count)) %>% 
         summarize(abortion_per_1k_births = count / (births / 1000),
                   abortion_per_100k_pop = count / (total_population / 100000),
                   .groups = 'drop') %>% 
         rename(abortions = count) %>% 
-        filter(!state_location %in% c('Hawaii', 'Alaska', 'District of Columbia'))
+        filter(!state_location %in% c('Hawaii', 'Alaska', 'District of Columbia'),
+               state_location %in% state.name) %>% 
+        filter(year %in% 2010:2019)
     }
     
     # proportion of abortions occurring after 13 weeks
@@ -262,7 +257,8 @@
       late_early_df <- gestation %>% 
         filter(!state %in% c('Hawaii', 'Alaska', 'District of Columbia'),
                !is.na(x0_13)) %>% 
-        mutate(post13 = total_reported - x0_13) %>% 
+        mutate(post13 = total_reported - x0_13,
+               post13 = ifelse(post13 < 0, 0, post13)) %>% 
         rename(pre13 = x0_13) %>% 
         select(state, year, pre13, post13) 
       
@@ -275,14 +271,16 @@
     # a fudge factor to nonresident abortion rates since we can't take the log
     # of 0)
     
-    dep_var_df <- inner_join(nonres_df, abortion_rates, by = c('state_location', 'year')) %>% 
-      inner_join(late_early_df, by = c('state_location' = 'state', 'year')) %>% 
+    dep_var_df <- full_join(nonres_df, abortion_rates, by = c('state_location', 'year')) %>% 
+      full_join(late_early_df, by = c('state_location' = 'state', 'year')) %>% 
       mutate(prop_late = post13 / abortions,
              rate_late = post13 / (births / 1000),
              rate_early = pre13 / (births / 1000),
-             prop_nonres = imports / abortions,
-             rate_nonres = imports / (births / 1000),
-             rate_res = res / (births / 1000)) 
+             prop_nonres = nonres / abortions,
+             rate_nonres = nonres / (births / 1000),
+             rate_res = res / (births / 1000)) %>% 
+      filter(!state_location %in% c('District of Columbia', 'Hawaii', 'Alaska')) %>% 
+      distinct()
     
   }
 }
@@ -329,7 +327,7 @@
     
     # education for % with bachelor's degree
     
-    pct_bachelors <- read_excel('data-creation/raw-data/downloads/bachelors-degree-holders-per-25-44-year-olds.xlsx', 
+    prop_bachelors <- read_excel('data-creation/raw-data/downloads/bachelors-degree-holders-per-25-44-year-olds.xlsx', 
                                 skip = 2) %>% 
       clean_names() %>% 
       select(x1, 
@@ -338,7 +336,9 @@
       clean_names() %>% 
       select(state, x2010:x2019) %>% 
       pivot_longer(x2010:x2019, names_to = 'year', values_to = 'pct_bachelors') %>% 
-      mutate(year = parse_number(year))
+      mutate(year = parse_number(year),
+             prop_bachelors = pct_bachelors / 100) %>% 
+      select(-pct_bachelors)
     
     # race / ethnicity (want percent non-white and percent hispanic)...
     # origin==2 is Hispanic, race==1 means white alone or in combination, and
@@ -377,7 +377,7 @@
   
   # combining into a single control df
   {
-    controls <- pct_bachelors %>% 
+    controls <- prop_bachelors %>% 
       inner_join(pops, by = c('state', 'year')) %>% 
       inner_join(race_controls, by = c('state', 'year')) %>% 
       inner_join(income, by = c('state', 'year')) %>% 
@@ -410,7 +410,12 @@
     select(-total_population.x) %>% 
     rename(state = state_location,
            total_population = total_population.y) %>% 
-    distinct()
+    select(state, year, abortion_per_1k_births, rate_nonres, rate_res,
+           rate_late, rate_early, prop_late, everything()) %>% 
+    group_by(state) %>% 
+    arrange(state, year) %>% 
+    distinct() %>% 
+    ungroup()
   
   # writing to a csv for easy analysis
   
