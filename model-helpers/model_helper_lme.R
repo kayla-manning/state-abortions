@@ -27,9 +27,11 @@
   
   standardize <- function(x) {(x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)}
   nonspatial_df <- read_csv('data-creation/raw-data/combined_data.csv') %>% 
+    group_by(year) %>% 
     mutate(across(c(within_score, surrounding_score, hh_income, prop_bachelors, 
                     prop_hisp, prop_nonwhite, hh_income, dem_2party, total_population), 
                   standardize)) %>% 
+    ungroup() %>% 
     inner_join(
       read.delim('https://www2.census.gov/geo/docs/reference/cenpop2020/CenPop2020_Mean_ST.txt') %>% 
         separate(STATEFP.STNAME.POPULATION.LATITUDE.LONGITUDE, sep = ',',
@@ -213,4 +215,16 @@ rate_res_mod <- fitted_models$rate_res$raw$best_mod
 rate_late_mod <- fitted_models$rate_late$raw$best_mod
 rate_early_mod <- fitted_models$rate_early$raw$best_mod
 prop_late_mod <- fitted_models$prop_late$raw$best_mod
+
+# refitting rate model with full observations to include 2014, 2016, 2017 data
+# for CA, NY, and other missing states... also the above models drop all
+# observations that fail to report gestational age data, even though they may
+# report overall abortion counts
+
+# rate_mod <- lme(sqrt(abortion_per_1k_births) ~ surrounding_score * within_score + 
+#                   prop_bachelors + prop_hisp + prop_nonwhite + hh_income + dem_2party + 
+#                   total_population, 
+#                 random = ~ 1|year, 
+#                 data = drop_na(combined, abortion_per_1k_births))
+
   

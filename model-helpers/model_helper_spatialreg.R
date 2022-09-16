@@ -28,12 +28,11 @@
   
   standardize <- function(x) {(x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)}
   nonspatial_df <- read_csv('data-creation/raw-data/combined_data.csv') %>% 
-    mutate(hh_income = hh_income / 1000) %>% 
-    mutate(across(c(within_score, surrounding_score, hh_income, pct_bachelors, 
+    group_by(year) %>% 
+    mutate(across(c(within_score, surrounding_score, hh_income, prop_bachelors, 
                     prop_hisp, prop_nonwhite, hh_income, dem_2party, total_population), 
                   standardize)) %>% 
-    mutate(late_to_early = post13 / (pre13 + post13)) %>% 
-    mutate(ie_ratio = imports/abortions) %>%
+    ungroup() %>% 
     inner_join(
       read.delim('https://www2.census.gov/geo/docs/reference/cenpop2020/CenPop2020_Mean_ST.txt') %>% 
         separate(STATEFP.STNAME.POPULATION.LATITUDE.LONGITUDE, sep = ',',
@@ -44,8 +43,8 @@
   # getting df that drops observations with NA in predictors/outcomes
   
   nonspatial_df <- nonspatial_df %>%
-    drop_na(abortions, births, within_score, surrounding_score,
-            pct_bachelors, total_population, prop_hisp, prop_nonwhite,
+    drop_na(abortion_per_1k_births, rate_nonres, rate_late, within_score, surrounding_score,
+            prop_bachelors, total_population, prop_hisp, prop_nonwhite,
             hh_income, dem_2party)
   
   # joining nonspatial data with spatial polygon data
@@ -82,21 +81,21 @@
     
     if (var == 'rate') {
       
-      raw_f <- as.formula(sqrt(abortion_per_1k_births) ~ surrounding_score * within_score + pct_bachelors + 
+      raw_f <- as.formula(sqrt(abortion_per_1k_births) ~ surrounding_score * within_score + prop_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }
     
     if (var == 'rate_nonres') {
       
-      raw_f <- as.formula(log(rate_nonres) ~ surrounding_score * within_score + pct_bachelors + 
+      raw_f <- as.formula(log(rate_nonres) ~ surrounding_score * within_score + prop_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }
     
     if (var == 'rate_res') {
       
-      raw_f <- as.formula(sqrt(rate_res) ~ surrounding_score * within_score + pct_bachelors + 
+      raw_f <- as.formula(sqrt(rate_res) ~ surrounding_score * within_score + prop_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }
@@ -105,21 +104,21 @@
     
     if (var == 'rate_late') {
       
-      raw_f <- as.formula(sqrt(rate_late) ~ surrounding_score * within_score + pct_bachelors + 
+      raw_f <- as.formula(sqrt(rate_late) ~ surrounding_score * within_score + prop_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }
     
     if (var == 'rate_early') {
       
-      raw_f <- as.formula(sqrt(rate_early) ~ surrounding_score * within_score + pct_bachelors + 
+      raw_f <- as.formula(sqrt(rate_early) ~ surrounding_score * within_score + prop_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }
     
     if (var == 'prop_late') {
       
-      raw_f <- as.formula(sqrt(prop_late) ~ surrounding_score * within_score + pct_bachelors + 
+      raw_f <- as.formula(sqrt(prop_late) ~ surrounding_score * within_score + prop_bachelors + 
                             prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population)
       
     }
@@ -217,7 +216,7 @@
     # writing the nb object to a file so that I don't have to recreate it every time
     # (it takes forever) & can just read it in directly
     
-    #write.nb.gal(usa_contig, 'raw-data/helper/usa_contig_nb.gal')
+    # write.nb.gal(usa_contig, 'data-creation/raw-data/helper/usa_contig_nb.gal')
     usa_contig <- read.gal('data-creation/raw-data/helper/usa_contig_nb.gal')
     
     # check for symmetric relationships (since if TX is a neighbor of OK, OK should

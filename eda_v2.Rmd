@@ -15,32 +15,28 @@ knitr::opts_chunk$set(message = FALSE,
 # loading libraries as needed
 
 {
-  # basic cleaning tasks
+  # data cleaning tasks
   
   library(tidyverse)
   library(readxl)
   library(janitor)
   library(zoo)
   library(broom)
-  
-  # dealing with NA data
-  
   library(naniar)
   
-  # mixed effects modeling
-  
-  library(lme4)
-    
-  # helping format tables
+  # format tables
   
   library(reshape2)
   library(kableExtra)
   
-  # for maps
+  # for maps & plots
   
   library(maps)
-  library(gganimate)
-  library(transformr)
+  library(ggpubr)
+  library(gridExtra)
+  library(grid)
+  crimson <- 	'#dc143c'
+  
 }
 
 # individual datasets that will be useful for different visualizations
@@ -103,6 +99,437 @@ combined <- read_csv('data-creation/raw-data/combined_data.csv') %>%
 ```
 
 # Data
+
+# Defining variables
+
+## Policy scores
+
+### Raw scores
+
+```{r score_tables}
+
+# points allotted to each level of policy
+
+policies %>% 
+  select(policy, level, score) %>% 
+  distinct() %>% 
+  arrange(policy, desc(score)) %>% 
+  mutate(score = round(score, 3)) %>% 
+  kable(booktabs = TRUE, caption = 'Points allotted to each policy')
+
+```
+
+```{r score_visualizations}
+
+# want to take a look at the overall distributions, with and without missingness
+# starting with within-state scores
+
+within_all <- combined %>% 
+  ggplot(aes(within_score)) +
+  geom_histogram() +
+  theme_minimal() +
+  labs(subtitle = 'Includes all state-year observations',
+       x = '', y = '')
+
+within_nonmissing <- combined %>% 
+  drop_na(rate_nonres, rate_late) %>% 
+  ggplot(aes(within_score)) +
+  geom_histogram() +
+  theme_minimal() +
+  labs(subtitle = 'Excludes states that do not report abortion data to the CDC',
+       x = 'Within-state policy score', y = '')
+
+ggarrange(within_all, within_nonmissing,
+          nrow = 2) %>% 
+  annotate_figure(left = text_grob('Count', rot = 90, vjust = 1, 
+                                  size = 12),
+                  top = text_grob('Within-state policy scores', size = 14))
+
+# doing the same for surroundings
+
+surrounding_all <- combined %>% 
+  ggplot(aes(surrounding_score)) +
+  geom_histogram() +
+  theme_minimal()  +
+  labs(subtitle = 'Includes all state-year observations',
+       x = '', y = '')
+
+surrounding_nonmissing <- combined %>% 
+  drop_na(rate_nonres, rate_late) %>% 
+  ggplot(aes(surrounding_score)) +
+  geom_histogram() +
+  theme_minimal() +
+  labs(subtitle = 'Excludes states that do not report abortion data to the CDC',
+       x = 'Surrounding-state policy score', y = '')
+
+ggarrange(surrounding_all, surrounding_nonmissing,
+          nrow = 2) %>% 
+  annotate_figure(left = text_grob('Count', rot = 90, vjust = 1, 
+                                  size = 12),
+                  top = text_grob('Surrounding-state policy scores', size = 14))
+
+```
+
+```{r score_maps}
+
+# visualizing policy scores on a map
+
+p1 <- map_df %>% 
+  filter(year %in% c(2010, 2019)) %>%
+  ggplot() +
+  geom_polygon(aes(long, lat, group = group, fill = within_score),
+               color = 'black') +
+  scale_fill_gradient2(high = crimson) +
+  coord_fixed() +
+  facet_wrap(~year, nrow = 1) +
+  labs(title = 'Within-state policy scores',
+       fill = '') +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+p2 <- map_df %>% 
+  filter(year %in% c(2010, 2019)) %>%
+  ggplot() +
+  geom_polygon(aes(long, lat, group = group, fill = surrounding_score),
+               color = 'black') +
+  scale_fill_gradient2(high = crimson) +
+  coord_fixed() +
+  facet_wrap(~year, nrow = 1) +
+  labs(title = 'Surrounding-state policy scores',
+       fill = '') +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+
+ggarrange(p1, p2,
+          nrow = 2)
+
+```
+
+### Tercile categories
+
+```{r tercile_df}
+
+# getting a table that has the cutoffs
+
+category_cutoffs <- combined %>% 
+  pivot_longer(within_score:surrounding_score) %>% 
+  group_by(name) %>% 
+  mutate(min = min(value),
+         first_cutoff = quantile(value, 1/3),
+         second_cutoff = quantile(value, 2/3),
+         max = max(value)) %>% 
+  select(name, min:max) %>% 
+  distinct()
+
+category_cutoffs %>% 
+  kable(booktabs = TRUE,
+        caption = 'Cutoffs for each score category')
+
+```
+
+```{r tercile_counts}
+
+# seeing overall breakdown between the categories for reporting & all states
+
+reporting_terciles <- combined %>% 
+  drop_na(abortion_per_1k_births, rate_late) %>% 
+  group_by(within_between) %>% 
+  summarise(n_reporting = n())
+all_terciles <- combined %>% 
+  group_by(within_between) %>% 
+  summarise(n_total = n())
+inner_join(reporting_terciles, all_terciles) %>% 
+  mutate(n_nonreporting = n_total-n_reporting) %>% 
+  select(within_between, n_reporting, n_nonreporting, n_total) %>% 
+  kable(caption = 'Policy terciles of reporting vs. nonreporting states',
+        col.names = c('Tercile category', 'Reporting', 'Nonreporting', 'Total')) %>% 
+  add_header_above(c(' ' = 1, 'Count of observations by CDC reporting status' = 2, ' ' = 1)) %>% 
+  row_spec(3, bold = T, color = "black", background = rep("lightyellow")) %>% 
+  column_spec(4, width = '4em')
+
+# seeing if there are repeats in a state
+
+combined %>% 
+  group_by(state) %>% 
+  count(within_between) %>% 
+  arrange(desc(n))
+combined %>% 
+  count(within_between) %>% 
+  ggplot(aes(within_between, n)) +
+  geom_col() +
+  labs(title = 'Counts of state-year observations in each of the 9 policy categories',
+       x = 'Intrastate-interstate score categories') +
+  theme_minimal()
+
+```
+
+```{r tercile_viz}
+
+# graphing the distributions of the cutoffs (side-by-side histograms of each
+# score)
+{
+  combined %>% 
+  pivot_longer(within_score:surrounding_score) %>% 
+  ggplot() +
+  geom_histogram(aes(value)) +
+  facet_wrap(~name) +
+  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                    name == 'within_score'),
+             aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'within_score']),
+             color = 'red') +
+  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                    name == 'within_score'),
+             aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'within_score']),
+             color = 'red') +
+  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                    name == 'surrounding_score'),
+             aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'surrounding_score']),
+             color = 'red') +
+  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                    name == 'surrounding_score'),
+             aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'surrounding_score']),
+             color = 'red') +
+  theme_minimal() +
+  labs(title = 'Cutoffs for policy score categories',
+       subtitle = 'Based on terciles of the score distributions')
+}
+
+# visualizing on 2d plot (scatterplot with intrastate on x and interstate on y)
+{
+  combined %>% 
+    pivot_longer(within_score:surrounding_score) %>% 
+    group_by(name) %>% 
+    mutate(first_cutoff = quantile(value, 1/3),
+           second_cutoff = quantile(value, 2/3)) %>% 
+    mutate(level = case_when(value <= first_cutoff ~ 'low',
+                             value > first_cutoff & value <= second_cutoff ~ 'med',
+                             value > second_cutoff ~ 'high')) %>% 
+    select(-c(first_cutoff, second_cutoff)) %>% 
+    group_by(state, year) %>% 
+    mutate(score_type = name) %>% 
+    pivot_wider(names_from = name, values_from = level) %>% 
+    pivot_wider(names_from = score_type, values_from = value, names_prefix = 'score') %>% 
+    mutate(across(c(surrounding_score, scoresurrounding_score),
+                  function(x) na.locf(x, fromLast = TRUE))) %>% 
+    mutate(across(c(within_score, scorewithin_score),
+                  function(x) na.locf(x))) %>% 
+    mutate(within_between = paste(within_score, surrounding_score, sep = '-')) %>% 
+    select(-c(within_score, surrounding_score)) %>% 
+    rename(surrounding_score = scoresurrounding_score,
+           within_score = scorewithin_score) %>% 
+    ggplot(aes(within_score, surrounding_score, color = fct_relevel(within_between,
+                                        levels = c('low-low', 'low-med', 'low-high',
+                                                   'med-low', 'med-med', 'med-high',
+                                                   'high-low', 'high-med', 'high-high')))) +
+    geom_point() +
+    geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                      name == 'within_score'),
+               aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'within_score']),
+               color = 'red') +
+    geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                      name == 'within_score'),
+               aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'within_score']),
+               color = 'red') +
+    geom_hline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                      name == 'surrounding_score'),
+               aes(yintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'surrounding_score']),
+               color = 'red')+
+    geom_hline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                      name == 'surrounding_score'),
+               aes(yintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'surrounding_score']),
+               color = 'red') +
+    theme_minimal() +
+    labs(title = 'Visualizing policy terciles',
+         color = '[Within]-[surrounding]',
+         x = 'Within-state policy score',
+         y = 'Surrounding-state policy score') +
+    scale_color_brewer(palette = 'OrRd')
+}
+
+# seeing how categories change over time
+
+combined %>% 
+  select(within_between, year) %>% 
+  ggplot(aes(within_between)) +
+  geom_bar() +
+  facet_wrap(~year)+
+  coord_flip() +
+  labs(title = 'Increasing hostility in national landscape with time') +
+  theme_minimal()
+
+```
+
+```{r explore_policy_levels}
+
+# getting counts of different policy types over the years... showing 10 that had
+# the largest magnitudes of change over the period from 2010-2019
+
+policies %>% 
+  select(-c(state, as_of, accessed)) %>% 
+  group_by(year, policy, level) %>% 
+  summarize(n = n(), .groups = 'drop') %>% 
+  filter(year %in% 2010:2019) %>% 
+  pivot_wider(names_from = year, values_from = n) %>% 
+  mutate(across(3:ncol(.), function(x) replace_na(x, 0))) %>% 
+  arrange(desc(abs(`2019`-`2010`)))
+
+# getting a count of most popular policy levels when aggregated across all
+# states and years
+
+policies %>% 
+  select(-c(state, as_of, accessed)) %>% 
+  group_by(policy, level) %>% 
+  summarize(n = n(), .groups = 'drop') %>% 
+  drop_na(level) %>% 
+  arrange(desc(n)) %>% head(10)
+
+```
+
+## Dependent variables
+
+```{r rates}
+
+# visualizing abortion rates per population & births... highly correlated. for
+# substantive reasons (since birth counts include non-residents & my question
+# has to do with abortions as a function of births rather than a function of
+# residents) & to control for female population, I will do abortions per births
+
+combined %>% 
+  ggplot(aes(abortion_per_1k_births, abortion_per_100k_pop)) +
+  geom_point() +
+  geom_smooth(method = 'lm') +
+  theme_minimal() +
+  labs(title = 'Abortion rates as a function of population vs total births',
+       subtitle = 
+         paste('Correlation of', round(cor(abortion_rates$abortion_per_100k_pop,
+                                           abortion_rates$abortion_per_1k_births,
+                                           use = 'complete.obs'), 3)))
+
+# plotting histograms of the two rates
+
+combined %>% 
+  select(abortion_per_100k_pop, abortion_per_1k_births) %>% 
+  pivot_longer(everything()) %>% 
+  ggplot(aes(value)) +
+  geom_histogram() +
+  facet_wrap(~name) +
+  labs(title = 'Nearly identical distributions for different abortion rate definitions',
+       subtitle = 'Main analysis will focus on abortions as a rate of births') +
+  theme_minimal()
+
+# getting extreme values
+
+combined %>% 
+  drop_na(abortion_per_1k_births) %>% 
+  filter(abortion_per_1k_births %in% c(min(abortion_per_1k_births), 
+                                       max(abortion_per_1k_births)))
+
+```
+
+```{r nonres_and_res_rate}
+
+# taking a look at the histogram... incredibly skewed
+
+combined %>% 
+  ggplot(aes(rate_nonres)) +
+    geom_histogram() +
+    labs(title = 'Nonresident abortion rate') +
+    theme_minimal()
+
+# getting extreme values for nonresidents
+
+combined %>% 
+  drop_na(rate_nonres) %>% 
+  filter(rate_nonres %in% c(min(rate_nonres), max(rate_nonres))) %>% 
+  select(state, year, rate_nonres)
+
+# doing the same for residents
+
+combined %>% 
+  drop_na(rate_res) %>% 
+  filter(rate_res %in% c(min(rate_res), max(rate_res))) %>% 
+  select(state, year, rate_res)
+
+```
+
+```{r late_vs_early}
+
+# generating plot and getting summary stats
+
+combined %>% 
+  ggplot(aes(prop_late)) +
+  geom_histogram() +
+  labs(title = 'Distribution of later-term share of abortions') +
+  theme_minimal()
+
+# getting later-term rate extreme values
+
+combined %>% 
+  drop_na(rate_late) %>% 
+  filter(rate_late %in% c(min(rate_late), max(rate_late))) %>% 
+  select(state, year, rate_late)
+
+# getting earlier-term rate extreme values
+
+combined %>% 
+  drop_na(rate_early) %>% 
+  filter(rate_early %in% c(min(rate_early), max(rate_early))) %>% 
+  select(state, year, rate_early)
+
+# getting later-term share extreme values
+
+combined %>% 
+  drop_na(prop_late) %>% 
+  filter(prop_late %in% c(min(prop_late), max(prop_late))) %>% 
+  select(state, year, prop_late)
+
+```
+
+```{r combine_dep_vars}
+
+# getting simple correlation between all of the variables
+
+combined %>% 
+  select(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
+         abortion_per_1k_births, 
+         abortion_per_100k_pop) %>% 
+  cor(use = 'complete.obs') %>% 
+  kable(booktabs = TRUE,
+        caption = 'Bivariate correlations between dependent variables')
+combined %>% 
+  select(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
+         abortion_per_1k_births, 
+         abortion_per_100k_pop) %>% 
+  filter_at(vars(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
+         abortion_per_1k_births, 
+         abortion_per_100k_pop), 
+         all_vars(!is.na(.))) %>% 
+  cor() %>% 
+  ggcorrplot::ggcorrplot(hc.order = TRUE, type = "lower",
+   lab = TRUE)
+
+# generating histograms of all of the distributions
+
+combined %>% 
+  select(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
+         abortion_per_1k_births, 
+         abortion_per_100k_pop)%>% 
+  pivot_longer(everything()) %>% 
+  ggplot(aes(value)) +
+  geom_histogram() +
+  facet_wrap(~name, scales = 'free') +
+  theme_minimal() +
+  labs(title = 'Distributions of outcome variables')
+
+# mapping combined values
+
+```
 
 ## Limitations
 
@@ -283,7 +710,7 @@ state_nonreport_cats %>%
   geom_polygon(aes(long, lat, group = group, fill = years_reporting),
                color = 'black') +
   scale_fill_manual(breaks = c('All', 'Some', 'None'),
-                    values = c('red3', 'indianred1', 'ivory4')) +
+                    values = c(crimson, 'indianred1', 'ivory4')) +
   coord_fixed() +
   labs(title = 'CDC reporting status',
        fill = 'Years reported, \n2010-2019') +
@@ -401,14 +828,20 @@ aov_df %>%
 
 # printing as-of dates for my policy years
 
-policies %>% 
+asofdf <- policies %>% 
   select(year, as_of) %>% 
+  filter(year %in% 2010:2019) %>% 
   distinct() %>% 
+  mutate(as_of = paste(month(as_of, label = TRUE, abbr = FALSE), day(as_of))) 
+
+asofdf %>% 
   rename(Year = year, `Earliest available policies` = as_of) %>% 
   kable(booktabs = TRUE,
         align = 'c',
         caption = 'Earliest available policy data on the Internet Archive') %>% 
-  kable_styling(full_width = TRUE)
+  kable_styling(full_width = TRUE) %>% 
+  row_spec(which(!str_detect(asofdf$as_of, 'January')),
+           bold = T, color = "black", background = rep("lightyellow"))
 
 ```
 
@@ -431,379 +864,5 @@ policies %>%
   group_by(policy, level) %>% 
   summarize(n = n(), .groups = 'drop') %>% 
   arrange(desc(n))
-
-```
-
-# Defining variables
-
-## Policy scores
-
-```{r score_tables}
-
-# points allotted to each level of policy
-
-policies %>% 
-  select(policy, level, score) %>% 
-  distinct() %>% 
-  arrange(policy, desc(score)) %>% 
-  mutate(score = round(score, 3)) %>% 
-  kable(booktabs = TRUE, caption = 'Points allotted to each policy')
-
-```
-
-```{r score_visualizations}
-
-# want to take a look at the overall distributions
-
-combined %>% 
-  ggplot(aes(within_score)) +
-  geom_histogram() +
-  theme_minimal() +
-  labs(title = 'Within-state policy scores')
-
-combined %>% 
-  ggplot(aes(surrounding_score)) +
-  geom_histogram() +
-  theme_minimal() +
-  labs(title = 'Surrounding-state policy scores')
-
-```
-
-```{r score_maps}
-
-# visualizing policy scores on a map
-
-p1 <- map_df %>% 
-  filter(year %in% c(2010, 2019)) %>%
-  ggplot() +
-  geom_polygon(aes(long, lat, group = group, fill = within_score),
-               color = 'black') +
-  scale_fill_gradient2(high = 'red3') +
-  coord_fixed() +
-  facet_wrap(~year) +
-  labs(title = 'Within-state policy scores',
-       fill = '') +
-  theme(panel.background = element_blank(),
-        axis.text = element_blank(),
-        axis.line = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title = element_blank())
-
-p2 <- map_df %>% 
-  filter(year %in% c(2010, 2019)) %>%
-  ggplot() +
-  geom_polygon(aes(long, lat, group = group, fill = surrounding_score),
-               color = 'black') +
-  scale_fill_gradient2(high = 'red3') +
-  coord_fixed() +
-  facet_wrap(~year, nrow=2) +
-  labs(title = 'Surrounding-state policy scores',
-       fill = '') +
-  theme(panel.background = element_blank(),
-        axis.text = element_blank(),
-        axis.line = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title = element_blank())
-
-ggarrange(p1, p2,
-          nrow = 2)
-
-```
-
-```{r category_df}
-
-# getting a table that has the cutoffs
-
-category_cutoffs <- combined %>% 
-  pivot_longer(within_score:surrounding_score) %>% 
-  group_by(name) %>% 
-  mutate(min = min(value),
-         first_cutoff = quantile(value, 1/3),
-         second_cutoff = quantile(value, 2/3),
-         max = max(value)) %>% 
-  select(name, min:max) %>% 
-  distinct()
-
-category_cutoffs %>% 
-  kable(booktabs = TRUE,
-        caption = 'Cutoffs for each score category')
-
-```
-
-```{r category_viz}
-
-# graphing the distributions of the cutoffs (side-by-side histograms of each
-# score)
-{
-  combined %>% 
-  pivot_longer(within_score:surrounding_score) %>% 
-  ggplot() +
-  geom_histogram(aes(value)) +
-  facet_wrap(~name) +
-  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
-                    name == 'within_score'),
-             aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'within_score']),
-             color = 'red') +
-  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
-                    name == 'within_score'),
-             aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'within_score']),
-             color = 'red') +
-  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
-                    name == 'surrounding_score'),
-             aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'surrounding_score']),
-             color = 'red')+
-  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
-                    name == 'surrounding_score'),
-             aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'surrounding_score']),
-             color = 'red') +
-  theme_minimal() +
-  labs(title = 'Cutoffs for policy score categories',
-       subtitle = 'Based on terciles of the score distributions')
-}
-
-# visualizing on 2d plot (scatterplot with intrastate on x and interstate on y)
-{
-  combined %>% 
-    pivot_longer(within_score:surrounding_score) %>% 
-    group_by(name) %>% 
-    mutate(first_cutoff = quantile(value, 1/3),
-           second_cutoff = quantile(value, 2/3)) %>% 
-    mutate(level = case_when(value <= first_cutoff ~ 'low',
-                             value > first_cutoff & value <= second_cutoff ~ 'med',
-                             value > second_cutoff ~ 'high')) %>% 
-    select(-c(first_cutoff, second_cutoff)) %>% 
-    group_by(state, year) %>% 
-    mutate(score_type = name) %>% 
-    pivot_wider(names_from = name, values_from = level) %>% 
-    pivot_wider(names_from = score_type, values_from = value, names_prefix = 'score') %>% 
-    mutate(across(c(surrounding_score, scoresurrounding_score),
-                  function(x) na.locf(x, fromLast = TRUE))) %>% 
-    mutate(across(c(within_score, scorewithin_score),
-                  function(x) na.locf(x))) %>% 
-    mutate(within_between = paste(within_score, surrounding_score, sep = '-')) %>% 
-    select(-c(within_score, surrounding_score)) %>% 
-    rename(surrounding_score = scoresurrounding_score,
-           within_score = scorewithin_score) %>% 
-    ggplot(aes(within_score, surrounding_score, color = fct_relevel(within_between,
-                                        levels = c('low-low', 'low-med', 'low-high',
-                                                   'med-low', 'med-med', 'med-high',
-                                                   'high-low', 'high-med', 'high-high')))) +
-    geom_point() +
-    geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
-                      name == 'within_score'),
-               aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'within_score']),
-               color = 'red') +
-    geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
-                      name == 'within_score'),
-               aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'within_score']),
-               color = 'red') +
-    geom_hline(data = filter(pivot_longer(combined, within_score:surrounding_score),
-                      name == 'surrounding_score'),
-               aes(yintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'surrounding_score']),
-               color = 'red')+
-    geom_hline(data = filter(pivot_longer(combined, within_score:surrounding_score),
-                      name == 'surrounding_score'),
-               aes(yintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'surrounding_score']),
-               color = 'red') +
-    theme_minimal() +
-    labs(title = 'Cutoffs for policy score categories',
-         subtitle = 'Based on terciles of the score distributions',
-         color = 'within_between')
-}
-
-# seeing overall breakdown between the categories
-
-combined %>% 
-  count(within_between)
-combined %>% 
-  group_by(state) %>% 
-  count(within_between) %>% 
-  arrange(desc(n))
-combined %>% 
-  count(within_between) %>% 
-  ggplot(aes(within_between, n)) +
-  geom_col() +
-  labs(title = 'Counts of state-year observations in each of the 9 policy categories',
-       x = 'Intrastate-interstate score categories') +
-  theme_minimal()
-
-# seeing how categories change over time
-
-combined %>% 
-  select(within_between, year) %>% 
-  ggplot(aes(within_between)) +
-  geom_bar() +
-  facet_wrap(~year)+
-  coord_flip() +
-  labs(title = 'Increasing hostility in national landscape with time') +
-  theme_minimal()
-
-```
-
-## Dependent variables
-
-```{r rates}
-
-# visualizing abortion rates per population & births... highly correlated. for
-# substantive reasons (since birth counts include non-residents & my question
-# has to do with abortions as a function of births rather than a function of
-# residents) & to control for female population, I will do abortions per births
-
-combined %>% 
-  ggplot(aes(abortion_per_1k_births, abortion_per_100k_pop)) +
-  geom_point() +
-  geom_smooth(method = 'lm') +
-  theme_minimal() +
-  labs(title = 'Abortion rates as a function of population vs total births',
-       subtitle = 
-         paste('Correlation of', round(cor(abortion_rates$abortion_per_100k_pop,
-                                           abortion_rates$abortion_per_1k_births,
-                                           use = 'complete.obs'), 3)))
-
-# plotting histograms of the two rates
-
-combined %>% 
-  select(abortion_per_100k_pop, abortion_per_1k_births) %>% 
-  pivot_longer(everything()) %>% 
-  ggplot(aes(value)) +
-  geom_histogram() +
-  facet_wrap(~name) +
-  labs(title = 'Nearly identical distributions for different abortion rate definitions',
-       subtitle = 'Main analysis will focus on abortions as a rate of births') +
-  theme_minimal()
-
-# getting extreme values
-
-combined %>% 
-  drop_na(abortion_per_1k_births) %>% 
-  filter(abortion_per_1k_births %in% c(min(abortion_per_1k_births), 
-                                       max(abortion_per_1k_births)))
-
-```
-
-```{r nonres_and_res_rate}
-
-# taking a look at the histogram... incredibly skewed
-
-combined %>% 
-  ggplot(aes(rate_nonres)) +
-    geom_histogram() +
-    labs(title = 'Nonresident abortion rate') +
-    theme_minimal()
-
-# getting extreme values for nonresidents
-
-combined %>% 
-  drop_na(rate_nonres) %>% 
-  filter(rate_nonres %in% c(min(rate_nonres), max(rate_nonres))) %>% 
-  select(state, year, rate_nonres)
-
-# doing the same for residents
-
-combined %>% 
-  drop_na(rate_res) %>% 
-  filter(rate_res %in% c(min(rate_res), max(rate_res))) %>% 
-  select(state, year, rate_res)
-
-```
-
-```{r late_vs_early}
-
-# generating plot and getting summary stats
-
-combined %>% 
-  ggplot(aes(prop_late)) +
-  geom_histogram() +
-  labs(title = 'Distribution of later-term share of abortions') +
-  theme_minimal()
-
-# getting later-term rate extreme values
-
-combined %>% 
-  drop_na(rate_late) %>% 
-  filter(rate_late %in% c(min(rate_late), max(rate_late))) %>% 
-  select(state, year, rate_late)
-
-# getting earlier-term rate extreme values
-
-combined %>% 
-  drop_na(rate_early) %>% 
-  filter(rate_early %in% c(min(rate_early), max(rate_early))) %>% 
-  select(state, year, rate_early)
-
-# getting later-term share extreme values
-
-combined %>% 
-  drop_na(prop_late) %>% 
-  filter(prop_late %in% c(min(prop_late), max(prop_late))) %>% 
-  select(state, year, prop_late)
-
-```
-
-```{r combine_dep_vars}
-
-# getting simple correlation between all of the variables
-
-combined %>% 
-  select(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
-         abortion_per_1k_births, 
-         abortion_per_100k_pop) %>% 
-  cor(use = 'complete.obs') %>% 
-  kable(booktabs = TRUE,
-        caption = 'Bivariate correlations between dependent variables')
-combined %>% 
-  select(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
-         abortion_per_1k_births, 
-         abortion_per_100k_pop) %>% 
-  filter_at(vars(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
-         abortion_per_1k_births, 
-         abortion_per_100k_pop), 
-         all_vars(!is.na(.))) %>% 
-  cor() %>% 
-  ggcorrplot::ggcorrplot(hc.order = TRUE, type = "lower",
-   lab = TRUE)
-
-# generating histograms of all of the distributions
-
-combined %>% 
-  select(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
-         abortion_per_1k_births, 
-         abortion_per_100k_pop)%>% 
-  pivot_longer(everything()) %>% 
-  ggplot(aes(value)) +
-  geom_histogram() +
-  facet_wrap(~name, scales = 'free') +
-  theme_minimal() +
-  labs(title = 'Distributions of outcome variables')
-
-```
-
-# Exploring the data
-
-## Policies
-
-```{r explore_policy_levels}
-
-# getting counts of different policy types over the years... showing 10 that had
-# the largest magnitudes of change over the period from 2010-2019
-
-policies %>% 
-  select(-c(state, as_of, accessed)) %>% 
-  group_by(year, policy, level) %>% 
-  summarize(n = n(), .groups = 'drop') %>% 
-  filter(year %in% 2010:2019) %>% 
-  pivot_wider(names_from = year, values_from = n) %>% 
-  mutate(across(3:ncol(.), function(x) replace_na(x, 0))) %>% 
-  arrange(desc(abs(`2019`-`2010`)))
-
-# getting a count of most popular policy levels when aggregated across all
-# states and years
-
-policies %>% 
-  select(-c(state, as_of, accessed)) %>% 
-  group_by(policy, level) %>% 
-  summarize(n = n(), .groups = 'drop') %>% 
-  drop_na(level) %>% 
-  arrange(desc(n)) %>% head(10)
 
 ```

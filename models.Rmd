@@ -116,35 +116,6 @@ ggarrange(p1, p2, p3, nrow = 3) %>%
 
 ```
 
-```{r data_corplots}
-
-# creating plots of raw data for latitude, longitude, and year
-
-usa@data %>% 
-  select(abortion_per_1k_births, prop_nonres, prop_late,
-         latitude, longitude, year) %>% 
-  rename(rate = abortion_per_1k_births,
-         ie = prop_nonres,
-         late_early = prop_late,
-         lat = latitude, 
-         long = longitude) %>% 
-  pivot_longer(rate:late_early, 
-               names_to = 'var', values_to = 'data') %>% 
-  pivot_longer(lat:year, names_to = 'covariate') %>% 
-  mutate(var = fct_relevel(var, 'rate', 'ie', 'late_early')) %>% 
-  ggplot(aes(value, data)) +
-  geom_point() +
-  geom_jitter(width = 0.6, alpha = 0.4) +
-  geom_smooth() +
-  facet_grid(vars(var), vars(covariate), scales = 'free') +
-  theme_bw() +
-  labs(title = 'Spatiotemporal trends in outcome variables',
-       caption = 'Data are jittered horizontally to distinguish between datapoints occuring in the same locations and years',
-       x = '',
-       y = 'Outcome variable')
-
-```
-
 ```{r global_morans}
 
 # extracting model weight & preparing listws for moran tests
@@ -340,9 +311,10 @@ rate_colnames <- c(
 
 # formatting overall, nonresident, and resident rate models
 
-mutate(get_lme_summary_df(rate_mod), dep = 'rate') %>% 
+display_rate_df <- mutate(get_lme_summary_df(rate_mod), dep = 'rate') %>% 
   bind_rows(mutate(get_lme_summary_df(rate_nonres_mod), dep = 'nonres'),
-            mutate(get_lme_summary_df(rate_res_mod))) %>% 
+            mutate(get_lme_summary_df(rate_res_mod), dep = 'res')) 
+display_rate_df %>% 
   mutate(ci = paste0('(', round(value-qnorm(0.975)*std_error, 3), 
                      ', ', round(value+qnorm(0.975)*std_error, 3), ')'),
          value = round(value, 5)) %>% 
@@ -385,10 +357,11 @@ time_colnames <- c(
 
 # formatting a table as done above
 
-bind_rows(mutate(get_lme_summary_df(rate_mod), dep = 'rate') %>% 
+display_timing_df <- bind_rows(mutate(get_lme_summary_df(rate_mod), dep = 'rate') %>% 
     mutate(get_lme_summary_df(rate_late_mod), dep = 'late_rate'),
     mutate(get_lme_summary_df(rate_early_mod), dep = 'early_rate'),
-    mutate(get_lme_summary_df(prop_late_mod), dep = 'late_share')) %>% 
+    mutate(get_lme_summary_df(prop_late_mod), dep = 'late_share'))
+display_timing_df %>% 
   mutate(ci = paste0('(', round(value-qnorm(0.975)*std_error, 3), 
                      ', ', round(value+qnorm(0.975)*std_error, 3), ')'),
          value = round(value, 5)) %>% 
@@ -418,140 +391,130 @@ bind_rows(mutate(get_lme_summary_df(rate_mod), dep = 'rate') %>%
 
 ```
 
-```{r coef_viz}
+```{r isolate_policy_coefs}
 
-# I want to try to visualize coefficients... writing a function to do so
+# getting all score coefficients together, and then I will want to isolate by
+# coefficient type
 
-compare_coefs <- function(outcome) {
-  extra_coefs %>% 
-    mutate(dep_type = case_when(str_detect(dep, 'rate') ~ 'rate',
-                                str_detect(dep, 'share') ~ 'share'),
-           dep = str_remove_all(str_remove_all(dep, '_rate'), '_share')) %>% 
-    filter(str_detect(term, 'score'),
-           dep == outcome) %>%
-    ggplot(aes(value, term, color = p_value<0.05)) +
-    geom_point() +
-    geom_errorbarh(aes(xmin = value - qnorm(0.975)*std_error,
-                       xmax = value + qnorm(0.975)*std_error)) +
-    geom_vline(xintercept = 0,
-               color = 'red',
-               linetype = 'dotted') +
-    facet_wrap(vars(dep_type),
-               nrow = 2) +
-    labs(title = outcome)
+all_score_coefs <- display_rate_df %>% 
+  bind_rows(display_timing_df) %>% 
+  filter(str_detect(term, 'score')) %>% 
+  select(dep, term, value, p_value) %>% 
+  mutate(dep = case_when(dep == 'rate' ~ 'Overall abortion rates',
+                         dep == 'nonres' ~ 'Nonresident abortion rates',
+                         dep == 'res' ~ 'Resident abortion rates',
+                         dep == 'late_rate' ~ 'Later-term abortion rates',
+                         dep == 'early_rate' ~ 'Earlier-term abortion rates',
+                         dep == 'late_share' ~ 'Later-term share of abortions')) %>% 
+  mutate(change = ifelse(value < 0, 'Decrease', 'Increase'))
+
+# writing a function to isolate specific score coefficient across all variables
+
+display_policy_effects <- function (input) {
+  title <- case_when(str_detect(input, ':') ~ 'Interaction',
+          str_detect(input, 'surrounding') ~ 'Surrounding-state',
+          str_detect(input, 'within') ~ 'Within-state')
+  all_score_coefs %>% 
+    filter(term == input) %>% 
+    select(dep, change, value, p_value) %>% 
+    mutate(value = round(value, 5),
+           change = ifelse(p_value < 0.05, paste0(change, fixed('*')), change)) %>% 
+    kable(booktabs = T,
+          caption = paste(title, 'coefficients'),
+          col.names = c('Transformed outcome', 'Change', 'Coefficient', 'p-value')) %>% 
+    column_spec(2:3, width = '5em') %>% 
+    kable_styling()
 }
 
-compare_coefs('late')
-compare_coefs('early')
-compare_coefs('nonres')
+display_policy_effects('surrounding_score')
+display_policy_effects('within_score')
+display_policy_effects('surrounding_score:within_score')
 
 ```
 
-## Count models
+```{r predict_change}
 
-```{r fitting_count_models}
+# creating dummy table where all predictors are average, except for surrounding_score
 
-library(lme4)
+dummy_scores <- seq(-1, 1, by = 0.1)
+dummy_df <- tibble(surrounding_score = rep(dummy_scores, times = 3),
+                   within_score = rep(seq(-1, 1), each = length(dummy_scores)),
+                   prop_bachelors = 0,
+                   prop_hisp = 0,
+                   prop_nonwhite = 0,
+                   hh_income = 0,
+                   dem_2party = 0,
+                   total_population = 0,
+                   year = 2019)
 
-# interaction term is significant and positive for late count... that means more
-# hostile --> greater increase in count of later term (insignificant INCREASE
-# for surroundings)
+# adding predictions to this table & getting some other variables of interest
 
-test_late <- glmer.nb(post13 ~ surrounding_score * within_score + pct_bachelors + 
-           prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population +
-           offset(log(births)) + (1 | year),
-           data = usa@data)
+pred_diff_df <- dummy_df %>% 
+  select(within_score, surrounding_score) %>% 
+  mutate(rate = predict(rate_mod, dummy_df)^2,
+         rate_nonres = exp(predict(rate_nonres_mod, dummy_df)),
+         rate_res = predict(rate_res_mod, dummy_df)^2,
+         rate_late = predict(rate_late_mod, dummy_df)^2,
+         rate_early = predict(rate_early_mod, dummy_df)^2,
+         prop_late = predict(prop_late_mod, dummy_df)^2) %>% 
+  pivot_longer(rate:prop_late, names_to = 'outcome') %>% 
+  mutate(outcome = fct_relevel(outcome, 
+                               'rate', 'rate_nonres', 'rate_res',
+                               'rate_late', 'rate_early', 'prop_late')) %>% 
+  arrange(outcome) %>% 
+  mutate(outcome = recode(outcome,
+                           'rate' = 'Abortions per \n1000 live births',
+                           'rate_nonres' = 'Nonresident abortions per \n1000 live births',
+                           'rate_res' = 'Resident abortions per \n1000 live births',
+                           'rate_late' = 'Later-term abortions per \n1000 live births',
+                           'rate_early' = 'Earlier-term abortions per \n1000 live births',
+                           'prop_late' = 'Later-term share of \nabortions')) 
 
-# fewer abortions, but insignificant (significant positive interaction term
-# though)
+# visualizing all outcomes together
 
-test_abortions <- glmer.nb(abortions ~ surrounding_score * within_score + pct_bachelors + 
-           prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population +
-           offset(log(births)) + (1 | year),
-           data = usa@data,
-           control=glmerControl(optimizer="bobyqa",
-                               optCtrl=list(maxfun=2e10)))
+pred_diff_df %>% 
+  ggplot(aes(surrounding_score, value, color = as.factor(within_score))) +
+  geom_line() +
+  facet_wrap(~outcome, scales = 'free') +
+  theme_minimal() +
+  labs(x = 'Standardized surrounding-state score',
+       y = 'Estimated response',
+       color = 'Standardized \nwithin-state \nscore') +
+    scale_color_brewer(palette = 'OrRd')
 
-# doing same thing to see what happens to early count
+# getting each one separately
 
-test_early <- glmer.nb(pre13 ~ surrounding_score * within_score + pct_bachelors + 
-           prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population +
-           offset(log(births)) + (1 | year),
-           data = usa@data,
-           control=glmerControl(optimizer="bobyqa",
-                               optCtrl=list(maxfun=2e10)))
-
-# and nonresident counts
-
-test_nonres <- glmer.nb(imports ~ surrounding_score * within_score + pct_bachelors + 
-           prop_hisp + prop_nonwhite + hh_income + dem_2party + total_population +
-           offset(log(births)) + (1 | year),
-           data = usa@data,
-           control=glmerControl(optimizer="bobyqa",
-                               optCtrl=list(maxfun=2e10)))
-
-get_nbinom_summary_df <- function (mod) {
-  data.frame(summary(mod)$coefficients) %>%
-    clean_names() %>% 
-    mutate(across(where(is.numeric), function(x) round(x, 5))) %>% 
-    mutate(estimate = ifelse(pr_z < 0.05, 
-                             paste0(estimate, fixed('*')), 
-                             estimate)) %>% 
-    rownames_to_column('term') %>% 
-    filter(str_detect(term, 'score')) %>% 
-    select(term, estimate)
+outcomes <- unique(pred_diff_df$outcome)
+get_pred_plot <- function(x) {
+  pred_diff_df %>% 
+    filter(outcome == x) %>% 
+    ggplot(aes(surrounding_score, value, color = as.factor(within_score))) +
+    geom_line() +
+    theme_minimal() +
+    labs(x = 'Standardized surrounding-state score',
+         y = x,
+         color = 'Standardized \nwithin-state \nscore') +
+      scale_color_brewer(palette = 'OrRd')
 }
+lapply(outcomes, get_pred_plot)
 
-mutate(get_nbinom_summary_df(test_nonres), mod = 'nonres') %>% 
-  bind_rows(mutate(get_nbinom_summary_df(test_late), mod = 'late')) %>% 
-  bind_rows(mutate(get_nbinom_summary_df(test_early), mod = 'early')) %>% 
-  bind_rows(mutate(get_nbinom_summary_df(test_abortions), mod = 'abortions')) %>% 
-  pivot_wider(names_from = mod, values_from = estimate)
+# illustrating why I only consider scores between -1 and 1
+
+usa@data %>% 
+  ggplot(aes(within_score, surrounding_score)) +
+  geom_point() +
+  theme_minimal() +
+  geom_smooth(method = 'lm')
+
+usa@data %>% 
+  ggplot(aes(within_score, surrounding_score)) +
+  geom_point() +
+  theme_minimal() +
+  geom_smooth(method = 'lm') +
+  scale_x_continuous(limits = c(-1, 1)) +
+  scale_y_continuous(limits = c(-1, 1))
 
 ```
-
-```{r count_diagnostics}
-
-# writing functions to get diagnostic plots
-{
-  # cook's distances for influential points (>1)
-  get_cooks <- function(mod) {
-    plot(cooks.distance(mod),
-         type="h", lwd=2,
-         xlab="Observation index",
-         ylab="Cook's distances",
-         main="Cook's distances")
-    abline(h=1,lty=2,col="red")
-  }
-  
-  # deviance residuals vs. fitted for lack of fit (don't want a pattern here)
-  get_resid <- function(mod) {
-    plot(log(fitted(mod)), residuals(mod, type = 'deviance'),
-         xlab = 'Natural log of the fitted values',
-         ylab = 'Deviance residuals',
-         main = 'Residuals vs. fitted')
-    abline(0, 0, col = 'red')
-  }
-  
-  # putting the plots side-by-side
-  get_nbin_plots <- function(mod) {
-    par(mfrow = c(1, 2),
-        oma=c(0, 0, 2, 0))
-    get_resid(mod)
-    get_cooks(mod)
-    title(paste(deparse(substitute(mod)), 'diagnostics'), side = 3, outer = TRUE)
-  }
-}
-
-for (mod in list(test_nonres, test_late, test_early, test_abortions)) {
-  get_nbin_plots(mod)
-}
-
-test_resids <- DHARMa::simulateResiduals(test_nonres)
-plot(test_resids)
-
-```
-
 
 ## Model diagnostics
 
@@ -615,8 +578,11 @@ states <- map_data('state')
 for (y in 2010:2019) {
   p <- usa@data %>% 
     mutate(rate_resids = residuals(rate_mod),
-           ie_resids = residuals(prop_nonres_mod),
-           late_early_resids = residuals(prop_late_mod),
+           rate_nonres_resids = residuals(rate_nonres_mod),
+           rate_res_resids = residuals(rate_res_mod),
+           rate_late_resids = residuals(rate_late_mod),
+           rate_early_resids = residuals(rate_early_mod),
+           prop_late_resids = residuals(prop_late_mod),
            NAME_1 = str_to_lower(NAME_1)) %>% 
     inner_join(states, by = c('NAME_1' = 'region')) %>%
     filter(year == y) %>% 
