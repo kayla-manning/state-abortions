@@ -62,7 +62,7 @@ p1 <- map_df %>%
   geom_polygon(aes(long, lat, group = group, fill = abortion_per_1k_births),
                color = 'black') +
   scale_fill_gradient2(high = 'red3') +
-  coord_fixed() +
+  coord_fixed(1.2) +
   facet_wrap(~year) +
   labs(title = 'Abortion Rate',
        fill = '') +
@@ -72,7 +72,7 @@ p1 <- map_df %>%
         axis.ticks = element_blank(),
         axis.title = element_blank())
 
-# IE ratio
+# nonres rate
 
 p2 <- map_df %>% 
   filter(year %in% c(2010, 2019)) %>% 
@@ -80,7 +80,7 @@ p2 <- map_df %>%
   geom_polygon(aes(long, lat, group = group, fill = rate_nonres),
                color = 'black') +
   scale_fill_gradient2(high = 'red3') +
-  coord_fixed() +
+  coord_fixed(1.2) +
   facet_wrap(~year) +
   labs(title = 'Nonresident Abortion Rate',
        fill = '') +
@@ -90,7 +90,7 @@ p2 <- map_df %>%
         axis.ticks = element_blank(),
         axis.title = element_blank())
 
-# late-early ratio
+# late rate
 
 p3 <- map_df %>% 
   filter(year %in% c(2010, 2019)) %>% 
@@ -98,7 +98,7 @@ p3 <- map_df %>%
   geom_polygon(aes(long, lat, group = group, fill = rate_late),
                color = 'black') +
   scale_fill_gradient2(high = 'red3') +
-  coord_fixed() +
+  coord_fixed(1.2) +
   facet_wrap(~year) +
   labs(title = 'Later-term Abortion Rate',
        fill = '') +
@@ -163,6 +163,7 @@ moran_outcomes <- do.call(rbind, lapply(global_moran_results, tidy)) %>%
          significant = p.value < 0.05) 
 moran_outcomes %>% 
   select(year, statistic, p.value) %>% 
+  mutate(across(statistic:p.value, function(x) round(x, 3))) %>% 
   kable(booktabs = TRUE,
         #format = 'latex',
         col.names = c('Year', 'I-statistic', 'p-value'),
@@ -173,8 +174,7 @@ moran_outcomes %>%
   pack_rows('Later-term abortion rate', 31, 41) %>%  
   pack_rows('Earlier-term abortion rate', 41, 50) %>% 
   pack_rows('Later-term abortion rate', 51, 60) %>% 
-  column_spec(1:3, width = "7em") %>% 
-  row_spec(which(moran_outcomes$significant), bold = T, color = "black", background = rep("lightyellow"))
+  column_spec(1:3, width = "7em") 
 
 ```
 
@@ -218,8 +218,8 @@ moran_outcomes %>%
   plots <- list()
   dep_vars <- c('abortion_per_1k_births', 'rate_nonres', 'rate_res',
                 'rate_late', 'rate_early', 'prop_late')
-  facet_labels <- c('Abortion rates', 'Nonresident abortion rate', 'Resident abortion rate',
-                    'Later-term abortion rate', 'Earlier-term abortion rate', 'Later-term share of abortions')
+  facet_labels <- c('Overall Abortion Rate', 'Nonresident Abortion Rate', 'Resident Abortion Rate',
+                    'Later-Term Abortion Rate', 'Earlier-Term Abortion Rate', 'Later-Term Share of Abortions')
   for (i in 1:length(dep_vars)) {
     plots[[i]] <- graph_df %>% 
       filter(name == dep_vars[i]) %>% 
@@ -228,40 +228,50 @@ moran_outcomes %>%
       geom_histogram() +
       facet_wrap(~transformation, scales = 'free') +
       labs(title = facet_labels[[i]], x = '', y = '') +
-      theme_minimal()
+      theme_thesis()
   }
   
   # printing out the plots
   
-  ggarrange(plots[[1]], plots[[2]], plots[[3]],
-            nrow = 3) %>% 
-    annotate_figure(left = textGrob('Count', rot = 90, vjust = 1),
-                    bottom = textGrob('Value'),
-                    top = text_grob('Dependent variables as approximately Gaussian distributions', 
-                                    size = 16)) 
+  grid1 <- ggarrange(plots[[1]], plots[[2]], plots[[3]],
+            nrow = 3) 
+  grid2 <- ggarrange(plots[[4]], plots[[5]], plots[[6]],
+                     nrow = 3)
+  ggarrange(grid1, grid2) %>% 
+    annotate_figure(left = text_grob('Count', rot = 90, vjust = 1, family = 'Times'),
+                    bottom = text_grob('Value', family = 'Times')) 
 
-  ggarrange(plots[[4]], plots[[5]], plots[[6]],
-            nrow = 3)
+  ggsave('figures/eda/transform_dists.png', width = 10, height = 7)
 }
+
 
 # also creating a histogram of standardized scores for EDA
 
 usa@data %>% 
   select(within_score, surrounding_score) %>% 
   pivot_longer(everything()) %>% 
-  mutate(name = str_replace(str_to_title(str_replace_all(name, '_', ' ' )), 'Score', 'score')) %>% 
+  mutate(name = str_to_title(str_replace_all(name, '_', '-State ' ))) %>% 
+  mutate(name = fct_relevel(name, 'Within-State Score', 'Surrounding-State Score')) %>% 
   ggplot(aes(value)) +
   geom_histogram() +
-  geom_vline(xintercept = 0) +
-  geom_vline(xintercept = 1, linetype = 'dashed', color = 'red') +
-  geom_vline(xintercept = -1, linetype = 'dashed', color = 'red') +
-  geom_vline(xintercept = 2, linetype = 'dotted', color = 'red') +
-  geom_vline(xintercept = -2, linetype = 'dotted', color = 'red') +
+  # geom_vline(xintercept = 0) +
+  # geom_vline(xintercept = 1, linetype = 'dashed', color = 'red') +
+  # geom_vline(xintercept = -1, linetype = 'dashed', color = 'red') +
+  # geom_vline(xintercept = 2, linetype = 'dotted', color = 'red') +
+  # geom_vline(xintercept = -2, linetype = 'dotted', color = 'red') +
   facet_wrap(~name) +
-  theme_minimal() +
-  labs(x = 'Standardized score',
-       y = 'Count',
-       title = 'Standardized policy scores')
+  theme_thesis() +
+  labs(x = 'Standardized Policy Score',
+       y = 'Count')
+ggsave('figures/eda/std_score_hist.png',
+       width = 7, height = 3)
+
+# I also want a quick table of standardized examples
+
+ep <- 0.05
+usa@data %>% 
+  filter(within_score > -2-ep & within_score < -2+ep) %>% 
+  select(NAME_1, year, within_score)
 
 ```
 
@@ -284,17 +294,20 @@ anova(fitted_models$rate$raw$all_mods$none, fitted_models$rate$raw$all_mods$gaus
   select(` `, everything()) %>% 
   mutate(across(c(AIC:logLik, L.Ratio), function(x) round(x, 1))) %>%
   mutate(`p-value` = round(`p-value`, 3)) %>% 
+  select(-L.Ratio) %>% 
   kable(booktabs = TRUE,
         caption = 'Likelihood Ratio Tests do not support the use of spatial models',
+        # format = 'latex',
         align=c(rep('c', times = 7))) %>% 
-  column_spec(1:7, width = "6em") %>% 
+  column_spec(1:7, width = "4em") %>% 
   pack_rows('Abortion Rate (abortions per 1k live births)', 1, 2) %>% 
   pack_rows('Nonresident Abortion Rate', 3, 4) %>% 
   pack_rows('Resident Abortion Rate', 5, 6) %>% 
   pack_rows('Later-term Abortion Rate', 7, 8) %>% 
   pack_rows('Earlier-term Abortion Rate', 9, 10) %>% 
-  pack_rows('Later-term Share of Abortions', 11, 12)  %>% 
-  row_spec(seq(1, 12, by = 2), bold = T, color = "black", background = "lightyellow")
+  pack_rows('Later-term Share of Abortions', 11, 12) 
+# %>% 
+#   row_spec(seq(1, 12, by = 2), bold = T, color = "black", background = "lightyellow")
 
 ```
 
@@ -304,7 +317,7 @@ anova(fitted_models$rate$raw$all_mods$none, fitted_models$rate$raw$all_mods$gaus
 
 rate_colnames <- c(
   'Variable',
-  'Rate model: Change in the square root of the abortion rate',
+  'Overall rate model: Change in the square root of the abortion rate',
   'Nonresident rate model: Change in the natural log of the nonresident abortion rate',
   'Resident rate model: Change in the square root of the resident abortion rate'
 )
@@ -317,10 +330,10 @@ display_rate_df <- mutate(get_lme_summary_df(rate_mod), dep = 'rate') %>%
 display_rate_df %>% 
   mutate(ci = paste0('(', round(value-qnorm(0.975)*std_error, 3), 
                      ', ', round(value+qnorm(0.975)*std_error, 3), ')'),
-         value = round(value, 5)) %>% 
+         value = round(value, 3)) %>% 
   mutate(value = ifelse(p_value < 0.05, paste0(value, '*'), value),
-         pr_z = round(p_value, 3),
-         value = paste(value, ci)) %>% 
+         # value = paste(value, ci),
+         pr_z = round(p_value, 3)) %>% 
   select(term, value, dep) %>% 
   pivot_wider(names_from = dep, values_from = value) %>% 
   mutate(term = str_remove_all(term, 'within_between')) %>% 
@@ -334,13 +347,14 @@ display_rate_df %>%
   arrange(term) %>% 
   kable(booktabs = TRUE,
         #format = 'latex',
-        col.names = rate_colnames,
-        caption = 'Fixed-Effects Coefficients for Linear Mixed-Effects Rate Models',
+        col.names = c('Variable', 'Overall Rates', 'Nonresident Rates', 'Resident Rates'),
+        caption = 'Fixed-Effects Coefficients for Linear Mixed-Effects Transformed Rate Models',
         align = c('l', rep('c', times = 3))) %>% 
   pack_rows('Policy environment', 2, 4) %>%
   pack_rows('Control variables', 5, 10)  %>% 
-  row_spec(c(2, 4), bold = T, color = "black", background = "lightyellow") %>%
-  column_spec(1:4, width = "15em")
+  # row_spec(c(2, 4), bold = T, color = "black", background = "lightyellow") %>%
+  column_spec(1, width = "15em") %>% 
+  column_spec(2:4, width = '5em')
 
 ```
 
@@ -364,10 +378,10 @@ display_timing_df <- bind_rows(mutate(get_lme_summary_df(rate_mod), dep = 'rate'
 display_timing_df %>% 
   mutate(ci = paste0('(', round(value-qnorm(0.975)*std_error, 3), 
                      ', ', round(value+qnorm(0.975)*std_error, 3), ')'),
-         value = round(value, 5)) %>% 
+         value = round(value, 3)) %>% 
   mutate(value = ifelse(p_value < 0.05, paste0(value, '*'), value),
-         pr_z = round(p_value, 3),
-         value = paste(value, ci)) %>% 
+         # value = paste(value, ci),
+         pr_z = round(p_value, 3)) %>% 
   select(term, value, dep) %>% 
   pivot_wider(names_from = dep, values_from = value) %>% 
   mutate(term = str_remove_all(term, 'within_between')) %>% 
@@ -381,13 +395,14 @@ display_timing_df %>%
   arrange(term) %>% 
   kable(booktabs = TRUE,
         #format = 'latex',
-        col.names = time_colnames,
-        caption = 'Fixed-Effects Coefficients for Linear Mixed-Effects Timing Models',
+        col.names = c('Variable', 'Later-Term Rates', 'Earlier-Term Rates', 'Later-Term Share'),
+        caption = 'Fixed-Effects Coefficients for Linear Mixed-Effects Transformed Timing Models',
         align = c('l', rep('c', times = 3))) %>% 
   pack_rows('Policy environment', 2, 4) %>%
-  pack_rows('Control variables', 5, 10) %>% 
-  row_spec(c(2, 4), bold = T, color = "black", background = "lightyellow") %>%
-  column_spec(2:4, width = "40em") 
+  pack_rows('Control variables', 5, 10)  %>% 
+  # row_spec(c(2, 4), bold = T, color = "black", background = "lightyellow") %>%
+  column_spec(1, width = "15em") %>% 
+  column_spec(2:4, width = '5em')
 
 ```
 
@@ -476,11 +491,25 @@ pred_diff_df %>%
   ggplot(aes(surrounding_score, value, color = as.factor(within_score))) +
   geom_line() +
   facet_wrap(~outcome, scales = 'free') +
-  theme_minimal() +
-  labs(x = 'Standardized surrounding-state score',
-       y = 'Estimated response',
+  theme_thesis() +
+  labs(x = 'Standardized Surrounding-State Score',
+       y = 'Estimated Response',
        color = 'Standardized \nwithin-state \nscore') +
     scale_color_brewer(palette = 'OrRd')
+ggsave('figures/eda/all_synthetic.png',
+       width = 7, height = 4)
+
+# outputting a df so I can see what the actual increases are when switching from
+# -1 to 1 surrounding-state
+
+pred_diff_df %>% 
+  filter(within_score == 1, surrounding_score %in% c(-1, 1)) %>% 
+  group_by(outcome) %>% 
+  mutate(diff = value - lag(value))
+
+```
+
+```{r extra_synthetic_plots}
 
 # getting each one separately
 
@@ -490,7 +519,7 @@ get_pred_plot <- function(x) {
     filter(outcome == x) %>% 
     ggplot(aes(surrounding_score, value, color = as.factor(within_score))) +
     geom_line() +
-    theme_minimal() +
+    theme_thesis() +
     labs(x = 'Standardized surrounding-state score',
          y = x,
          color = 'Standardized \nwithin-state \nscore') +
@@ -503,18 +532,19 @@ lapply(outcomes, get_pred_plot)
 usa@data %>% 
   ggplot(aes(within_score, surrounding_score)) +
   geom_point() +
-  theme_minimal() +
+  theme_thesis() +
   geom_smooth(method = 'lm')
 
 usa@data %>% 
   ggplot(aes(within_score, surrounding_score)) +
   geom_point() +
-  theme_minimal() +
+  theme_thesis() +
   geom_smooth(method = 'lm') +
   scale_x_continuous(limits = c(-1, 1)) +
   scale_y_continuous(limits = c(-1, 1))
 
 ```
+
 
 ## Model diagnostics
 
@@ -529,7 +559,8 @@ m <- 1
 
 # iterating through the models
 
-for (mod in list(rate_mod, prop_nonres_mod, prop_late_mod)) {
+for (mod in list(rate_mod, rate_nonres_mod, rate_res_mod,
+                 rate_late_mod, rate_early_mod, prop_late_mod)) {
   
   # iterating through each year for each model
   
@@ -554,19 +585,24 @@ for (mod in list(rate_mod, prop_nonres_mod, prop_late_mod)) {
 # putting Moran results in a nice table
 
 do.call(rbind, lapply(moran_results, tidy)) %>% 
-  mutate(year = rep(2010:2019, times = 3),
-         var = rep(c('rate', 'ie', 'late-early'), each = 10),
-         significant = p.value < 0.05) %>% 
+  mutate(across(statistic:p.value, function(x) round(x, 3))) %>% 
+  mutate(year = rep(2010:2019, times = 6),
+         var = rep(c('rate', 'nonres', 'res', 
+                     'late', 'early', 'late_share'), each = 10),
+         statistic = ifelse(p.value < 0.05, paste0(statistic, fixed('*')), statistic)) %>% 
   select(year, statistic, p.value) %>% 
   kable(booktabs = TRUE,
         #format = 'latex',
         col.names = c('Year', 'I-statistic', 'p-value'),
-        caption = "Moran's I-test on model residuals") %>% 
-  pack_rows('Abortion rates', 1, 10) %>%
-  pack_rows('Nonresident share of abortions', 11, 20) %>% 
-  pack_rows('Later-term share of abortions', 21, 30) %>% 
-  column_spec(1:3, width = "7em") %>% 
-  row_spec(c(3, 11), bold = T, color = "black", background = rep("lightyellow"))
+        caption = "Moran's I-test on model residuals",
+        align = rep('c', 3)) %>% 
+  pack_rows('Overall Rate', 1, 10) %>%
+  pack_rows('Nonresident Rate', 11, 20) %>% 
+  pack_rows('Resident Rate', 21, 30) %>% 
+  pack_rows('Later-Term Rate', 31, 40) %>% 
+  pack_rows('Earlier-Term Rate', 41, 50) %>% 
+  pack_rows('Later-Term Share', 51, 60) %>% 
+  column_spec(1:3, width = "5em") 
 
 ```
 
@@ -590,7 +626,7 @@ for (y in 2010:2019) {
     geom_polygon(aes(long, lat, group=group, fill = rate_resids),
                  color = 'black') +
     facet_wrap(~year) +
-    coord_fixed() +
+    coord_fixed(1.2) +
     labs(title = "Model residuals") +
     theme(panel.background = element_blank(),
           axis.text = element_blank(),
@@ -607,7 +643,7 @@ for (y in 2010:2019) {
 #   geom_polygon(aes(long, lat, group=group, fill = rate_resids),
 #                color = 'black') +
 #   transition_states(year) +
-#   coord_fixed() +
+#   coord_fixed(1.2) +
 #   labs(title = "Within-state policy scores in {closest_state}") +
 #   theme(panel.background = element_blank(),
 #         axis.text = element_blank(),
@@ -621,13 +657,20 @@ for (y in 2010:2019) {
 
 # generating diagnostic plots for each model
 
-models <- list(rate_mod, rate_nonres_mod, rate_late_mod, rate_early_mod)
-outcome_vars <- c('abortion rates',
-                  'nonresident abortion rate',
-                  'later-term abortion rate',
-                  'earlier-term abortion rate')
+models <- list(rate_mod, rate_nonres_mod, rate_res_mod, 
+               rate_late_mod, rate_early_mod, prop_late_mod)
+outcome_vars <- c('overall rates',
+                  'nonresident rate',
+                  'resident rate',
+                  'later-term rate',
+                  'earlier-term rate',
+                  'later-term share')
+abbrev <- c('rate', 'nonres', 'res', 
+            'late', 'early', 'prop_late')
 plots <- list()
 for (i in 1:length(models)) {
+  
+  path <- file.path(paste0('figures/eda/', abbrev[i], '_diagnostics.png'))
   
   # fitted vs residuals plot
   
@@ -638,7 +681,7 @@ for (i in 1:length(models)) {
   geom_hline(yintercept = 0,
              color = 'red',
              linetype = 'dashed') +
-  theme_minimal() +
+  theme_thesis() +
   labs(title = 'Residuals vs. fitted values',
        x = 'Fitted values',
        y = 'Residuals')
@@ -651,16 +694,18 @@ for (i in 1:length(models)) {
     ggplot(aes(sample = resid)) +
     stat_qq() +
     stat_qq_line(col = 'red') +
-    theme_minimal() +
+    theme_thesis() +
     labs(title = 'QQ-plot for normality of residuals',
          x = 'Theoretical quantiles',
          y = 'Sample quantiles')
   
   plots[[i]] <- annotate_figure(ggarrange(resid_vs_fit, qqplot),
-                                top = text_grob(paste('Diagnosic plots for', outcome_vars[[i]]),size = 14))
+                                top = text_grob(paste(str_to_title(outcome_vars[[i]])),
+                                                family = 'Times', size = 14))
+  plots[[i]]
+  ggsave(path, width = 7, height = 4)
 }
 
-plots
 
 ```
 
@@ -682,6 +727,60 @@ rate_late_sar <- rate_late_inv_dist[[2]][3][[1]]
 rate_early_sar <- rate_early_inv_dist[[2]][3][[1]]
 prop_late_sar <- prop_late_inv_dist[[2]][3][[1]]
 
+
+```
+
+```{r select_spatialreg}
+
+# getting df ready for model comparison
+
+comparison_df <- mutate(get_model_comparisons(rates_inv_dist, rates_inv_dist2, rates_contig), 
+                        var = 'rate') %>% 
+  bind_rows(mutate(get_model_comparisons(rate_nonres_inv_dist, rate_nonres_inv_dist2, rate_nonres_contig), 
+                   var = 'rate_nonres')) %>% 
+  bind_rows(mutate(get_model_comparisons(rate_res_inv_dist, rate_res_inv_dist2, rate_res_contig),
+                   var = 'rate_res')) %>% 
+  bind_rows(mutate(get_model_comparisons(rate_late_inv_dist, rate_late_inv_dist2, rate_late_contig),
+                   var = 'rate_late')) %>% 
+  bind_rows(mutate(get_model_comparisons(rate_early_inv_dist, rate_early_inv_dist2, rate_early_contig),
+                   var = 'rate_early')) %>% 
+  bind_rows(mutate(get_model_comparisons(prop_late_inv_dist, prop_late_inv_dist2, prop_late_contig),
+                   var = 'prop_late')) %>% 
+  mutate(var = fct_relevel(var, 'rate', 'rate_nonres', 'rate_res', 
+                           'rate_late', 'rate_early', 'prop_late')) %>%
+    select(var, method, 
+           AIC_inv_dist, AIC_inv_dist2, AIC_contig,
+           BIC_inv_dist, BIC_inv_dist2, BIC_contig,
+           logLik_inv_dist, logLik_inv_dist2, logLik_contig) %>% 
+    arrange(var, AIC_inv_dist2) %>% 
+  select(-var)
+
+# producing a formatted table
+
+{
+  comparison_df %>% 
+    mutate(across(where(is.numeric), function(x) round(x, 1))) %>% 
+    kable(booktabs = TRUE,
+          col.names = c('Method', 
+                        rep(c('Inverse distance', 
+                              'Inverse distance squared',
+                              'Contiguous'),
+                            times = 3)),
+          align=c(rep('c', times = 10))) %>% 
+    pack_rows('Overall Rate', 1, 4) %>% 
+    pack_rows('Nonresident Rate', 5, 8) %>% 
+    pack_rows('Resident Rate', 9, 12) %>% 
+    pack_rows('Later-Term Rate', 13, 16) %>% 
+    pack_rows('Earlier-Term Rate', 17, 20) %>% 
+    pack_rows('Later-Term Share', 21, 24) %>% 
+    add_header_above(header = c(' ' = 1, 
+                                'AIC for neighborhood specification' = 3,
+                                'BIC for neighborhood specification' = 3,
+                                'Log-likelihood for neighborhood specification' = 3)) %>% 
+    # row_spec(c(1, 5, 9), bold = T, color = "black", background = "lightyellow") %>% 
+    column_spec(1:10, width = "18em") %>% 
+    column_spec(seq(1, 10, by = 3), border_right = T)
+}
 
 ```
 
@@ -729,20 +828,21 @@ all_robustness_df <- mutate(get_lme_summary_df(rate_mod), dep = 'rate_mixef_nons
   arrange(var) %>% 
   select(term, mixef_nonspatial, fixef_spatial)
 
-# now I want to create a formatted table **IN THE MIDDLE OF THIS WHEN I STOPPED**
+# now I want to create a formatted table
 
 all_robustness_df  %>% 
   kable(booktabs = TRUE,
         caption = paste('Robustness check of policy coefficients'),
-        col.names = c(' ', 'Mixed-effect nonspatial model (`nlme`)', 'Fixed-effect SAR model (`spatialreg`)'),
+        col.names = c(' ', 'Mixed-Effect Nonspatial Model (`nlme`)', 'Fixed-Effect SAR Model (`spatialreg`)'),
+        #format = 'latex',
         align = c('l', 'c', 'c')) %>% 
-  pack_rows('Abortion rate', 1, 3) %>%
-  pack_rows('Nonresident abortion rate', 4, 6) %>% 
-  pack_rows('Resident abortion rate', 7, 9) %>% 
-  pack_rows('Later-term abortion rate', 10, 12) %>% 
-  pack_rows('Earlier-term abortion rate', 13, 15) %>% 
-  pack_rows('Later-term share of abortions', 16, 18) %>% 
-  column_spec(1, width = "20em") %>%
+  pack_rows('Overall Rate', 1, 3) %>%
+  pack_rows('Nonresident Rate', 4, 6) %>% 
+  pack_rows('Resident Rate', 7, 9) %>% 
+  pack_rows('Later-Term Rate', 10, 12) %>% 
+  pack_rows('Earlier-Term Rate', 13, 15) %>% 
+  pack_rows('Later-Term Share', 16, 18) %>% 
+  column_spec(1, width = "15em") %>%
   column_spec(2:3, width = '8em') 
 # %>% 
 #   row_spec(seq(1, 18, by = 3), bold = T, color = "black", background = "lightyellow") %>% 
