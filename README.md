@@ -1,5 +1,7 @@
-# Quantifying Spillover Effects of State Abortion Restrictions
+# Abortion Policy Spillover: When Policy Consequences Contradict the Intent
 ## Kayla Manning
+
+This repository contains the code for my joint thesis in Statistics and Government (currently in progress).
 
 ## Important files / directories
 
