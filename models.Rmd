@@ -48,6 +48,22 @@ source('model-helpers/model_helper_lme.R')
   }
 }
 
+# setting ggplot theme
+
+{
+  crimson <- '#dc143c'
+
+  # ggplot theme
+  
+  theme_thesis <- function() {
+    theme_grey(base_family="Times") +
+      theme(panel.background = element_blank(),
+            axis.line = element_line(colour = 'black'))
+}
+
+
+}
+
 ```
 
 ## Testing for Spatial Autocorrelation
@@ -682,8 +698,8 @@ for (i in 1:length(models)) {
              color = 'red',
              linetype = 'dashed') +
   theme_thesis() +
-  labs(title = 'Residuals vs. fitted values',
-       x = 'Fitted values',
+  labs(title = 'Residuals vs. Fitted Values',
+       x = 'Fitted Values',
        y = 'Residuals')
   
   # creating qqplot now
@@ -695,17 +711,14 @@ for (i in 1:length(models)) {
     stat_qq() +
     stat_qq_line(col = 'red') +
     theme_thesis() +
-    labs(title = 'QQ-plot for normality of residuals',
-         x = 'Theoretical quantiles',
-         y = 'Sample quantiles')
+    labs(title = 'QQ-plot for Normality of Residuals',
+         x = 'Theoretical Quantiles',
+         y = 'Sample Quantiles')
   
-  plots[[i]] <- annotate_figure(ggarrange(resid_vs_fit, qqplot),
-                                top = text_grob(paste(str_to_title(outcome_vars[[i]])),
-                                                family = 'Times', size = 14))
+  plots[[i]] <- ggarrange(resid_vs_fit, qqplot)
   plots[[i]]
   ggsave(path, width = 7, height = 4)
 }
-
 
 ```
 

@@ -60,9 +60,11 @@
                  by.x = 'NAME_1', by.y = 'state',
                  duplicateGeoms = TRUE, all.x = FALSE)
     
-    # making sure I don't end up with duplicates anywhere
+    # making sure I don't end up with duplicates anywhere... drop Wyoming
+    # because the data does funky things
     
-    usa@data <- distinct(usa@data)
+    usa@data <- distinct(usa@data) %>% 
+      filter(NAME_1 != 'Wyoming')
     
   }
   
