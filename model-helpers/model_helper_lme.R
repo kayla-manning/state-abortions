@@ -22,11 +22,21 @@
     library(broom)
   }
   
+  
   # data (getting income in 1000s & standardizing all quantitative dependent
   # variables so I can interpret as increase/decrease in 1 std. dev)
   
   standardize <- function(x) {(x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)}
-  nonspatial_df <- read_csv('data-creation/raw-data/combined_data.csv') %>% 
+  
+  # change this depending on if I want the simpler policy scores or the
+  # reweighted policy scores (simple is what I use in the main analysis)
+  
+  combined_path <- 'data-creation/raw-data/combined_data.csv'
+  # combined_path <- 'data-creation/raw-data/reweighted_combined_data.csv'
+  
+  # now actually reading in the proper dataset
+  
+  nonspatial_df <- read_csv(combined_path) %>% 
     group_by(year) %>% 
     mutate(across(c(within_score, surrounding_score, hh_income, prop_bachelors, 
                     prop_hisp, prop_nonwhite, hh_income, dem_2party, total_population), 

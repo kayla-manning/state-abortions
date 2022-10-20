@@ -37,7 +37,6 @@ knitr::opts_chunk$set(message = FALSE,
   library(ggpubr)
   library(gridExtra)
   library(grid)
-  library(viridis)
   
 }
 
@@ -94,56 +93,57 @@ combined <- read_csv('data-creation/raw-data/reweighted_combined_data.csv') %>%
                                      'med-low', 'med-med', 'med-high', 
                                      'high-low', 'high-med', 'high-high'))
 
+# getting data prepared for a map
+
+{
+  library(maps)
+  states <- map_data('state')
+  map_df <- combined %>% 
+    mutate(state = str_to_lower(state)) %>% 
+    inner_join(states, by = c('state' = 'region'))
+  }
+
+# setting ggplot theme
+
+{
+  crimson <- '#dc143c'
+  
+  # overwriting with my own red/orange color that I think looks better (the above line
+  # has the hex code from the latex template)
+  
+  crimson <- '#D64933'
+  
+  # set color schemes based on this link:
+  # https://coolors.co/palette/001219-005f73-0a9396-94d2bd-e9d8a6-ee9b00-ca6702-bb3e03-ae2012-9b2226
+  
+  default_color <- '#A4A5AE'
+  my_yellow <- '#FFE787'
+  my_lightblue <- '#CDEDF6'
+  within_color <- '#343F3E'
+  surrounding_color <-  crimson
+  overall_color <- '#023C40'
+  nonres_color <- '#BA5624'
+  res_color <- '#416788'
+  late_color <- '#BA5624'
+  early_color <- '#416788'
+  prop_late_color <- '#53131E'
+
+  # ggplot theme
+  
+  theme_thesis <- function() {
+    theme_grey(base_family="Times") +
+      theme(panel.background = element_blank(),
+            axis.line = element_line(colour = 'black'))
+}
+
+
+}
 
 # calling this so I can also reference my usa@data dataframe in some code
 
 source('model-helpers/model_helper_lme.R')
-
-# getting data prepared for a map (and dropping observations that aren't in
-# modeling dataset... need to figure out how to get this to check for state/year
-# pairings though)
-
-{
-  # getting underlying map info
-  
-  library(maps)
-  states <- map_data('state')
-  
-  # I want to get the state-year observations that are missing from usa@data
-
-  missing_obs <- anti_join(combined, usa@data, by = c('state' = 'NAME_1', 'year')) %>% 
-    select(state, year) %>% 
-    mutate(state = tolower(state))
-  
-  # combining map info with data for observations included in the models
-  
-  map_df <- combined %>% 
-    mutate(state = str_to_lower(state)) %>% 
-    inner_join(states, by = c('state' = 'region')) %>% 
-  mutate(across(abortion_per_1k_births:prop_late,
-                function (x) ifelse(paste(state, year) %in% paste(missing_obs$state, missing_obs$year),
-                                    NA,
-                                    x)))
-}
   
 ```
-
-```{r themes}
-
-# the crimson from the default stat LaTeX template
-
-crimson <- '#dc143c' 
-
-# writing my ggplot theme
-  
-theme_thesis <- function() {
-  theme_grey(base_family="Times") +
-    theme(panel.background = element_blank(),
-          axis.line = element_line(colour = 'black'))
-}
-
-```
-
 
 # Defining variables
 
@@ -175,25 +175,68 @@ score_key %>%
 
 ```{r score_visualizations}
 
-# want to take a look at the overall distributions (includes nonreporting states)
+# want to take a look at the overall distributions, with and without missingness
+# starting with within-state scores
 
-combined %>% 
+within_all <- combined %>% 
   ggplot(aes(within_score)) +
   geom_histogram(fill = default_color) +
   theme_classic(base_family="Times") +
+  labs(subtitle = 'Includes all state-year observations',
+       x = '', y = '')
+
+# within_nonmissing <- combined %>% 
+#   drop_na(rate_nonres, rate_late) %>% 
+#   ggplot(aes(within_score)) +
+#   geom_histogram() +
+#   theme_classic(base_family="Times") +
+#   labs(subtitle = 'Excludes states that do not report abortion data to the CDC',
+#        x = 'Within-state policy score', y = '')
+# 
+# ggarrange(within_all, within_nonmissing,
+#           nrow = 2) %>% 
+#   annotate_figure(left = text_grob('Count', rot = 90, vjust = 1, 
+#                                   size = 12, family = 'Times'))
+# ggsave('figures/eda/reporting_groups_within_scores.png')
+
+# also getting a plot of just the within-state scores
+
+within_all +
   labs(x = 'Within-State Policy Score',
-       y = 'Count')
+       y = 'Count',
+       subtitle = '')
 ggsave('figures/eda/within_score_hist.png',
        width = 7, height = 4)
 
 # doing the same for surroundings
 
-combined %>% 
+surrounding_all <- combined %>% 
   ggplot(aes(surrounding_score)) +
   geom_histogram(fill = default_color) +
   theme_classic(base_family="Times")  +
+  labs(subtitle = 'Includes all state-year observations',
+       x = '', y = '')
+# 
+# surrounding_nonmissing <- combined %>% 
+#   drop_na(rate_nonres, rate_late) %>% 
+#   ggplot(aes(surrounding_score)) +
+#   geom_histogram() +
+#   theme_classic(base_family="Times") +
+#   labs(subtitle = 'Excludes states that do not report abortion data to the CDC',
+#        x = 'Surrounding-state policy score', y = '')
+# 
+# ggarrange(surrounding_all, surrounding_nonmissing,
+#           nrow = 2) %>% 
+#   annotate_figure(left = text_grob('Count', rot = 90, vjust = 1, 
+#                                   size = 12, family = 'Times'))
+# ggsave('figures/eda/reporting_groups_surrounding_scores.png')
+
+# also getting a plot of just the surrounding-state scores
+
+surrounding_all +
   labs(x = 'Surrounding-State Policy Score',
-       y = 'Count')
+       y = 'Count',
+       subtitle = '')
 ggsave('figures/eda/surrounding_score_hist.png',
        width = 7, height = 4)
 
@@ -209,92 +252,55 @@ p1 <- map_df %>%
   geom_polygon(aes(long, lat, group = group, 
                    fill = within_score),
                color = 'black') +
-  scale_fill_viridis(option = 'viridis',
-                     direction = -1) +
+  scale_fill_gradient2(high = prop_late_color) +
   coord_fixed(1.2) +
   facet_wrap(~year, nrow = 1) +
-  labs(fill = 'Within-State Policy Score') +
+  labs(fill = 'Within-State\nPolicy Scores') +
   theme_grey(base_family = 'Times') +
   theme(panel.background = element_blank(),
         axis.text = element_blank(),
         axis.line = element_blank(),
         axis.ticks = element_blank(),
-        axis.title = element_blank(),
-        legend.position = 'bottom',
-        legend.key.height = unit(0.2, "cm"))
+        axis.title = element_blank())
+
+# saving just the within-state map first, then adding title so I can sve the map
+# with the different scores together
+
+p1
+# ggsave('figures/eda/within_map.png',
+#        width = 7, height = 2)
+# p1 <- p1 +
+#   labs(title = 'Within-State \nPolicy Scores')
 
 p2 <- map_df %>% 
   filter(year %in% c(2010, 2019)) %>%
   ggplot() +
   geom_polygon(aes(long, lat, group = group, fill = surrounding_score),
                color = 'black') +
-  scale_fill_viridis(option = 'plasma',
-                     direction = -1) +
+  scale_fill_gradient2(high = surrounding_color) +
   coord_fixed(1.2) +
   facet_wrap(~year, nrow = 1) +
-  labs(fill = 'Surrounding-State Policy Score') +
+  labs(fill = 'Surrounding-State\nPolicy Scores') +
   theme_grey(base_family = 'Times') +
   theme(panel.background = element_blank(),
         axis.text = element_blank(),
         axis.line = element_blank(),
         axis.ticks = element_blank(),
-        axis.title = element_blank(),
-        legend.position = 'bottom',
-        legend.key.height = unit(0.2, "cm"))
-
-# saving a printout of the two maps together
+        axis.title = element_blank())
+p2
+# ggsave('figures/eda/surrounding_map.png',
+#        width = 7, height = 2)
 
 ggarrange(p1, p2,
           nrow = 2)
-ggsave('figures/eda/both_score_maps.png',
-       width = 8, height = 5)
-
-# creating within_all_map
-
-map_df %>% 
-  ggplot() +
-  geom_polygon(aes(long, lat, group = group, 
-                   fill = within_score),
-               color = 'black') +
-  scale_fill_viridis(option = 'viridis',
-                     direction = -1) +
-  coord_fixed(1.2) +
-  facet_wrap(~year, nrow = 4) +
-  labs(fill = 'Within-State\nPolicy Score') +
-  theme_grey(base_family = 'Times') +
-  theme(panel.background = element_blank(),
-        axis.text = element_blank(),
-        axis.line = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title = element_blank())
-ggsave('figures/eda/within_all_map.png',
-       width = 6, height = 5)
-
-# surrounding_all_map
-
-map_df %>% 
-  ggplot() +
-  geom_polygon(aes(long, lat, group = group, fill = surrounding_score),
-               color = 'black') +
-  scale_fill_viridis(option = 'plasma',
-                     direction = -1) +
-  coord_fixed(1.2) +
-  facet_wrap(~year, nrow = 4) +
-  labs(fill = 'Surrounding-State\nPolicy Score') +
-  theme_grey(base_family = 'Times') +
-  theme(panel.background = element_blank(),
-        axis.text = element_blank(),
-        axis.line = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title = element_blank())
-ggsave('figures/eda/surrounding_all_map.png',
-       width = 6, height = 5)
+# ggsave('figures/eda/both_score_maps.png',
+#        width = 7, height = 4)
 
 ```
 
 ### Tercile categories
 
-```{r tercile_counts}
+```{r tercile_df}
 
 # getting a table that has the cutoffs
 
@@ -307,6 +313,14 @@ category_cutoffs <- combined %>%
          max = max(value)) %>% 
   select(name, min:max) %>% 
   distinct()
+
+category_cutoffs %>% 
+  kable(booktabs = TRUE,
+        caption = 'Cutoffs for each score category')
+
+```
+
+```{r tercile_counts}
 
 # seeing overall breakdown between the categories for reporting & all states
 
@@ -326,16 +340,52 @@ inner_join(reporting_terciles, all_terciles) %>%
   add_header_above(c(' ' = 1, 'Count of observations by CDC reporting status' = 2, ' ' = 1)) %>% 
   column_spec(4, width = '4em')
 
-# # seeing if there are repeats in a state
-# 
-# combined %>% 
-#   group_by(state) %>% 
-#   count(within_between) %>% 
-#   arrange(desc(n))
+# seeing if there are repeats in a state
+
+combined %>% 
+  group_by(state) %>% 
+  count(within_between) %>% 
+  arrange(desc(n))
+combined %>% 
+  count(within_between) %>% 
+  ggplot(aes(within_between, n)) +
+  geom_col() +
+  labs(title = 'Counts of state-year observations in each of the 9 policy categories',
+       x = 'Intrastate-interstate score categories') +
+  theme_classic(base_family="Times")
 
 ```
 
 ```{r tercile_viz}
+
+# graphing the distributions of the cutoffs (side-by-side histograms of each
+# score)
+{
+  combined %>% 
+  pivot_longer(within_score:surrounding_score) %>% 
+  ggplot() +
+  geom_histogram(aes(value)) +
+  facet_wrap(~name) +
+  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                    name == 'within_score'),
+             aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'within_score']),
+             color = 'red') +
+  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                    name == 'within_score'),
+             aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'within_score']),
+             color = 'red') +
+  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                    name == 'surrounding_score'),
+             aes(xintercept = category_cutoffs$first_cutoff[category_cutoffs$name == 'surrounding_score']),
+             color = 'red') +
+  geom_vline(data = filter(pivot_longer(combined, within_score:surrounding_score),
+                    name == 'surrounding_score'),
+             aes(xintercept = category_cutoffs$second_cutoff[category_cutoffs$name == 'surrounding_score']),
+             color = 'red') +
+  theme_classic(base_family="Times") +
+  labs(title = 'Cutoffs for policy score categories',
+       subtitle = 'Based on terciles of the score distributions')
+}
 
 # visualizing on 2d plot (scatterplot with intrastate on x and interstate on y)
 {
@@ -404,9 +454,63 @@ ggsave('figures/eda/terciles_time.png', height = 6, width = 7)
 
 ```
 
+```{r explore_policy_levels}
+
+# getting counts of different policy types over the years... showing 10 that had
+# the largest magnitudes of change over the period from 2010-2019
+
+policies %>% 
+  select(-c(state, as_of, accessed)) %>% 
+  group_by(year, policy, level) %>% 
+  summarize(n = n(), .groups = 'drop') %>% 
+  filter(year %in% 2010:2019) %>% 
+  pivot_wider(names_from = year, values_from = n) %>% 
+  mutate(across(3:ncol(.), function(x) replace_na(x, 0))) %>% 
+  arrange(desc(abs(`2019`-`2010`)))
+
+# getting a count of most popular policy levels when aggregated across all
+# states and years
+
+policies %>% 
+  select(-c(state, as_of, accessed)) %>% 
+  group_by(policy, level) %>% 
+  summarize(n = n(), .groups = 'drop') %>% 
+  drop_na(level) %>% 
+  arrange(desc(n)) %>% head(10)
+
+```
+
 ## Dependent variables
 
 ```{r rates}
+
+# visualizing abortion rates per population & births... highly correlated. for
+# substantive reasons (since birth counts include non-residents & my question
+# has to do with abortions as a function of births rather than a function of
+# residents) & to control for female population, I will do abortions per births
+
+combined %>% 
+  ggplot(aes(abortion_per_1k_births, abortion_per_100k_pop)) +
+  geom_point() +
+  geom_smooth(method = 'lm') +
+  theme_classic(base_family="Times") +
+  labs(title = 'Abortion rates as a function of population vs total births',
+       subtitle = 
+         paste('Correlation of', round(cor(abortion_rates$abortion_per_100k_pop,
+                                           abortion_rates$abortion_per_1k_births,
+                                           use = 'complete.obs'), 3)))
+
+# plotting histograms of the two rates
+
+combined %>% 
+  select(abortion_per_100k_pop, abortion_per_1k_births) %>% 
+  pivot_longer(everything()) %>% 
+  ggplot(aes(value)) +
+  geom_histogram() +
+  facet_wrap(~name) +
+  labs(title = 'Nearly identical distributions for different abortion rate definitions',
+       subtitle = 'Main analysis will focus on abortions as a rate of births') +
+  theme_classic(base_family="Times")
 
 # getting extreme values
 
@@ -424,12 +528,10 @@ usa@data %>%
   geom_polygon(aes(long, lat, group = group, 
                    fill = abortion_per_1k_births),
                color = 'black') +
-  # scale_fill_viridis(option = crimson,
-  #                    direction = -1) +
-  scale_fill_gradient2(high = crimson) +
+  scale_fill_gradient2(high = overall_color) +
   coord_fixed(1.2) +
   facet_wrap(~year, nrow = 1) +
-  labs(fill = 'Abortions per \n1000 Live Births') +
+  labs(fill = 'Abortions per \n1000 live births') +
   theme_grey(base_family = 'Times') +
   theme(panel.background = element_blank(),
         axis.text = element_blank(),
@@ -469,15 +571,15 @@ usa@data %>%
 
 map_df %>% 
   filter(year %in% c(2010, 2019)) %>%
-  ggplot()  +
+  ggplot() +
   geom_polygon(aes(long, lat, group = group, 
                    fill = rate_nonres),
                color = 'black') +
-  scale_fill_gradient2(high = crimson) +
+  scale_fill_gradient2(high = nonres_color) +
   coord_fixed(1.2) +
   facet_wrap(~year, nrow = 1) +
-  labs(fill = 'Nonresident Abortions \nper 1000 Live Births') +
-  theme_thesis() +
+  labs(fill = 'Nonresident abortions \nper 1000 live births') +
+  theme_grey(base_family = 'Times') +
   theme(panel.background = element_blank(),
         axis.text = element_blank(),
         axis.line = element_blank(),
@@ -494,11 +596,11 @@ map_df %>%
   geom_polygon(aes(long, lat, group = group, 
                    fill = rate_res),
                color = 'black') +
-  scale_fill_gradient2(high = crimson) +
+  scale_fill_gradient2(high = res_color) +
   coord_fixed(1.2) +
   facet_wrap(~year, nrow = 1) +
-  labs(fill = 'Resident Abortions \nper 1000 Live Births') +
-  theme_thesis() +
+  labs(fill = 'Resident abortions \nper 1000 live births') +
+  theme_grey(base_family = 'Times') +
   theme(panel.background = element_blank(),
         axis.text = element_blank(),
         axis.line = element_blank(),
@@ -506,9 +608,7 @@ map_df %>%
         axis.title = element_blank())
  ggsave('figures/eda/res_rate_map.png', 
         width = 7, height = 2)
- 
-model_map_df %>% 
-  filter(NAME_1 == 'california')
+
 ```
 
 ```{r late_vs_early}
@@ -554,10 +654,10 @@ combined %>%
   geom_polygon(aes(long, lat, group = group, 
                    fill = rate_late),
                color = 'black') +
-  scale_fill_gradient2(high = crimson) +
+  scale_fill_gradient2(high = late_color) +
   coord_fixed(1.2) +
   facet_wrap(~year, nrow = 1) +
-  labs(fill = 'Later-Term Abortions \nper 1000 Live Births') +
+  labs(fill = 'Later-term abortions \nper 1000 live births') +
   theme_grey(base_family = 'Times') +
   theme(panel.background = element_blank(),
         axis.text = element_blank(),
@@ -575,10 +675,10 @@ combined %>%
   geom_polygon(aes(long, lat, group = group, 
                    fill = rate_early),
                color = 'black') +
-  scale_fill_gradient2(high = crimson) +
+  scale_fill_gradient2(high = early_color) +
   coord_fixed(1.2) +
   facet_wrap(~year, nrow = 1) +
-  labs(fill = 'Earlier-Term Abortions \nper 1000 Live Births') +
+  labs(fill = 'Earlier-term abortions \nper 1000 live births') +
   theme_grey(base_family = 'Times') +
   theme(panel.background = element_blank(),
         axis.text = element_blank(),
@@ -596,10 +696,10 @@ map_df %>%
   geom_polygon(aes(long, lat, group = group, 
                    fill = prop_late),
                color = 'black') +
-  scale_fill_gradient2(high = crimson) +
+  scale_fill_gradient2(high = prop_late_color) +
   coord_fixed(1.2) +
   facet_wrap(~year, nrow = 1) +
-  labs(fill = 'Later-Term Share \nof Abortions') +
+  labs(fill = 'Later-term share \nof abortions') +
   theme_grey(base_family = 'Times') +
   theme(panel.background = element_blank(),
         axis.text = element_blank(),
@@ -608,6 +708,46 @@ map_df %>%
         axis.title = element_blank())
  ggsave('figures/eda/late_share_map.png', 
         width = 7, height = 2)
+
+```
+
+```{r combine_dep_vars}
+
+# # getting simple correlation between all of the variables
+# 
+# combined %>% 
+#   select(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
+#          abortion_per_1k_births, 
+#          abortion_per_100k_pop) %>% 
+#   cor(use = 'complete.obs') %>% 
+#   kable(booktabs = TRUE,
+#         caption = 'Bivariate correlations between dependent variables')
+# combined %>% 
+#   select(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
+#          abortion_per_1k_births, 
+#          abortion_per_100k_pop) %>% 
+#   filter_at(vars(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
+#          abortion_per_1k_births, 
+#          abortion_per_100k_pop), 
+#          all_vars(!is.na(.))) %>% 
+#   cor() %>% 
+#   ggcorrplot::ggcorrplot(hc.order = TRUE, type = "lower",
+#    lab = TRUE)
+# 
+# # generating histograms of all of the distributions
+# 
+# combined %>% 
+#   select(rate_nonres, rate_res, , rate_late, rate_early, prop_late, 
+#          abortion_per_1k_births, 
+#          abortion_per_100k_pop)%>% 
+#   pivot_longer(everything()) %>% 
+#   ggplot(aes(value)) +
+#   geom_histogram() +
+#   facet_wrap(~name, scales = 'free') +
+#   theme_classic(base_family="Times") +
+#   labs(title = 'Distributions of outcome variables')
+
+# mapping combined values
 
 ```
 
@@ -775,29 +915,28 @@ state_nonreport_cats <- combined %>%
 
 # making a map that is shaded by the percentage of years in which it reports
 
-cats_for_table <- state_nonreport_cats %>% 
+state_nonreport_cats %>% 
   group_by(state) %>% 
   summarize(report_years = sum(report_all)) %>% 
   mutate(state = str_to_lower(state),
          years_reporting = case_when(report_years == 10 ~ 'All',
                              report_years == 0 ~ 'None',
-                             TRUE ~ 'Some'))
-
-cats_for_table %>% 
-  filter(years_reporting %in% c('Some', 'None')) %>% 
-  arrange(years_reporting, state) %>% 
-  mutate(state = str_to_title(state)) %>% 
-  select(-years_reporting) %>% 
-  kable(booktabs = TRUE,
-        caption = 'CDC Nonreporting Categories',
-        #format = 'latex',
-        col.names = c(' ', 'Recorded State-Year Observations')) %>% 
-  pack_rows('Missing All State-Year Observations', 
-            1, 
-            length(cats_for_table$state[cats_for_table$years_reporting == 'None'])) %>% 
-  pack_rows('Missing Some State-Year Observations',
-            length(cats_for_table$state[cats_for_table$years_reporting == 'None']) + 1,
-            length(cats_for_table$state[cats_for_table$years_reporting %in% c('None', 'Some')]))
+                             TRUE ~ 'Some')) %>% 
+  inner_join(states, by = c('state' = 'region')) %>%
+  ggplot() +
+  geom_polygon(aes(long, lat, group = group, fill = years_reporting),
+               color = 'black') +
+  scale_fill_manual(breaks = c('All', 'Some', 'None'),
+                    values = c(early_color, my_lightblue, default_color)) +
+  coord_fixed(1.2) +
+  labs(fill = 'Years reported, \n2010-2019') +
+  theme_grey(base_family = 'Times') +
+  theme(panel.background = element_blank(),
+        axis.text = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank())
+ggsave('figures/eda/nonreport_map.png', width = 7, height = 2)
 
 # getting a table with the number of observations in each category
 
@@ -815,12 +954,37 @@ combined %>%
                                !nonreport ~ 'No')) %>% 
   kable(booktabs = TRUE,
         caption = 'Number of observations in each missingness category',
-        #format = 'latex',
+        format = 'latex',
         col.names = c('Missing CDC data', 'Number of observations')) 
 
 ```
 
 ```{r missing_balance}
+
+# comparing sample statistics for missing/non-missing groups & viewing alongside
+# missing abortion
+
+options(scipen = 999)
+
+# balance check for control variables
+
+# missing_balance_check %>% 
+#   filter(!statistic %in% c('abortion_per_1k_births',
+#                            'rate_nonres',
+#                            'rate_res',
+#                            'rate_late',
+#                            'rate_early',
+#                            'prop_late',
+#                            'prop_nonres'),
+#          !str_detect(statistic, 'score')) %>% 
+#   ggplot(aes(nonreport, mean)) +
+#   geom_col() +
+#   facet_wrap(~statistic, scales = 'free') +
+#   coord_flip() +
+#   labs(title = 'Examining control variables of missingness categories',
+#        subtitle = 'Median value for each variable within each category', 
+#        x = '') +
+#   theme_classic(base_family="Times")
 
 # printing out a table with the mean values for each group and p-value for
 # analysis of variance
@@ -934,29 +1098,6 @@ descriptions %>%
 
 ```
 
-```{r alternate_scores}
-
-# printing out a table with the points assigned to different categories
-
-score_key %>% 
-  select(category, category_weight, policy) %>% 
-  distinct() %>% 
-  group_by(category, category_weight) %>% 
-  arrange(desc(category_weight), category) %>% 
-  ungroup() %>% 
-  select(policy) %>% 
-  kable(booktabs = TRUE,
-        #format = 'latex',
-        caption = 'Categories and Weights for Alternative Scoring System',
-        col.names = '') %>% 
-  pack_rows('Banning the Procedure (4 points)', 1, 2) %>% 
-  pack_rows('Counseling-Related Policies (2 points)', 3, 6) %>% 
-  pack_rows('Restricting the Setting (2 points)', 7, 10) %>% 
-  pack_rows('Third-Party Refusal of Care (1 point)', 11, 13) %>% 
-  pack_rows('Funding Restrictions (1 point)', 14, 15)
-
-```
-
 ```{r sept2022_policies}
 
 # sourced from https://reproductiverights.org/maps/abortion-laws-by-state/ on
@@ -1029,6 +1170,10 @@ clinics %>%
        y = 'Counties Without an Abortion Clinic (%)')
 ggsave('figures/eda/clinic_boxplot.png',
        width = 6, height = 4)
+
+clinics %>% 
+  mutate(nonreport = ifelse(!state %in% usa@data$NAME_1, 1, 0)) %>% 
+  select(pct_without_clinic, report)
 
 ```
 

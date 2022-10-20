@@ -270,17 +270,13 @@ usa@data %>%
   mutate(name = fct_relevel(name, 'Within-State Score', 'Surrounding-State Score')) %>% 
   ggplot(aes(value)) +
   geom_histogram() +
-  # geom_vline(xintercept = 0) +
-  # geom_vline(xintercept = 1, linetype = 'dashed', color = 'red') +
-  # geom_vline(xintercept = -1, linetype = 'dashed', color = 'red') +
-  # geom_vline(xintercept = 2, linetype = 'dotted', color = 'red') +
-  # geom_vline(xintercept = -2, linetype = 'dotted', color = 'red') +
-  facet_wrap(~name) +
+  facet_wrap(~name,
+             nrow = 2) +
   theme_thesis() +
   labs(x = 'Standardized Policy Score',
        y = 'Count')
 ggsave('figures/eda/std_score_hist.png',
-       width = 7, height = 3)
+       width = 5, height = 4)
 
 # I also want a quick table of standardized examples
 
@@ -327,22 +323,16 @@ anova(fitted_models$rate$raw$all_mods$none, fitted_models$rate$raw$all_mods$gaus
 
 ```
 
-```{r rate_coefs}
+```{r coef_table}
 
-# naming columns for table
-
-rate_colnames <- c(
-  'Variable',
-  'Overall rate model: Change in the square root of the abortion rate',
-  'Nonresident rate model: Change in the natural log of the nonresident abortion rate',
-  'Resident rate model: Change in the square root of the resident abortion rate'
-)
-
-# formatting overall, nonresident, and resident rate models
+# formatting models
 
 display_rate_df <- mutate(get_lme_summary_df(rate_mod), dep = 'rate') %>% 
   bind_rows(mutate(get_lme_summary_df(rate_nonres_mod), dep = 'nonres'),
-            mutate(get_lme_summary_df(rate_res_mod), dep = 'res')) 
+            mutate(get_lme_summary_df(rate_res_mod), dep = 'res'),
+            mutate(get_lme_summary_df(rate_late_mod), dep = 'late_rate'),
+            mutate(get_lme_summary_df(rate_early_mod), dep = 'early_rate'),
+            mutate(get_lme_summary_df(prop_late_mod), dep = 'late_share'))  
 display_rate_df %>% 
   mutate(ci = paste0('(', round(value-qnorm(0.975)*std_error, 3), 
                      ', ', round(value+qnorm(0.975)*std_error, 3), ')'),
@@ -363,12 +353,12 @@ display_rate_df %>%
   arrange(term) %>% 
   kable(booktabs = TRUE,
         #format = 'latex',
-        col.names = c('Variable', 'Overall Rates', 'Nonresident Rates', 'Resident Rates'),
-        caption = 'Fixed-Effects Coefficients for Linear Mixed-Effects Transformed Rate Models',
-        align = c('l', rep('c', times = 3))) %>% 
+        col.names = c('Variable', 'Overall Rates', 'Nonresident Rates', 'Resident Rates',
+                      'Later-Term Rates', 'Earlier-Term Rates', 'Later-Term Share'),
+        caption = 'Fixed-Effects Coefficients for Linear Mixed-Effects Models of Transformed Outcomes',
+        align = c('l', rep('c', times = 6))) %>% 
   pack_rows('Policy environment', 2, 4) %>%
   pack_rows('Control variables', 5, 10)  %>% 
-  # row_spec(c(2, 4), bold = T, color = "black", background = "lightyellow") %>%
   column_spec(1, width = "15em") %>% 
   column_spec(2:4, width = '5em')
 
@@ -468,7 +458,7 @@ display_policy_effects('surrounding_score:within_score')
 # creating dummy table where all predictors are average, except for surrounding_score
 
 dummy_scores <- seq(-1, 1, by = 0.1)
-dummy_df <- tibble(surrounding_score = rep(dummy_scores, times = 3),
+base_df <- tibble(surrounding_score = rep(dummy_scores, times = 3),
                    within_score = rep(seq(-1, 1), each = length(dummy_scores)),
                    prop_bachelors = 0,
                    prop_hisp = 0,
@@ -477,17 +467,110 @@ dummy_df <- tibble(surrounding_score = rep(dummy_scores, times = 3),
                    dem_2party = 0,
                    total_population = 0,
                    year = 2019)
+dummy_df <- bind_rows(base_df, base_df, base_df, 
+                      base_df, base_df, base_df)
+
+# writing a function to get error bands around predictions for nlme models
+
+get_se <- function(mod) {
+  
+  #create design matrix
+  
+  Designmat <- model.matrix(eval(eval(mod$call$fixed)[-2]), base_df[-ncol(base_df)])
+  
+  #compute standard error for predictions
+  
+  predvar <- diag(Designmat %*% mod$varFix %*% t(Designmat))
+  se <- sqrt(predvar) 
+  return(se)
+  
+}
+
+get_se(late_mod)
 
 # adding predictions to this table & getting some other variables of interest
 
 pred_diff_df <- dummy_df %>% 
   select(within_score, surrounding_score) %>% 
-  mutate(rate = predict(rate_mod, dummy_df)^2,
-         rate_nonres = exp(predict(rate_nonres_mod, dummy_df)),
-         rate_res = predict(rate_res_mod, dummy_df)^2,
-         rate_late = predict(rate_late_mod, dummy_df)^2,
-         rate_early = predict(rate_early_mod, dummy_df)^2,
-         prop_late = predict(prop_late_mod, dummy_df)^2) %>% 
+  mutate(pred = c(predict(rate_mod, base_df)^2,
+                   exp(predict(rate_nonres_mod, base_df)),
+                   predict(rate_res_mod, base_df)^2,
+                   predict(rate_late_mod, base_df)^2,
+                   predict(rate_early_mod, base_df)^2,
+                   predict(prop_late_mod, base_df)^2),
+         se = c(get_se(rate_mod),
+                get_se(rate_nonres_mod),
+                get_se(rate_res_mod),
+                get_se(rate_late_mod),
+                get_se(rate_early_mod),
+                get_se(prop_late_mod)),
+         outcome = rep(c('rate', 'rate_nonres', 
+                         'rate_res', 'rate_late', 
+                         'rate_early', 'prop_late'),
+                       each = nrow(base_df))) %>% 
+  mutate(outcome = fct_relevel(outcome, 
+                               'rate', 'rate_nonres', 'rate_res',
+                               'rate_late', 'rate_early', 'prop_late')) %>% 
+  arrange(outcome) %>% 
+  mutate(outcome = recode(outcome,
+                           'rate' = 'Abortions per \n1000 live births',
+                           'rate_nonres' = 'Nonresident abortions per \n1000 live births',
+                           'rate_res' = 'Resident abortions per \n1000 live births',
+                           'rate_late' = 'Later-term abortions per \n1000 live births',
+                           'rate_early' = 'Earlier-term abortions per \n1000 live births',
+                           'prop_late' = 'Later-term share of \nabortions')) 
+
+
+
+
+
+# visualizing all outcomes together
+
+pred_diff_df %>% 
+  ggplot(aes(surrounding_score, pred, color = as.factor(within_score))) +
+  geom_line() +
+  geom_ribbon(aes(ymin=pred-2*se,ymax=pred+2*se),alpha=0.2,fill="blue") +
+  facet_wrap(~outcome, scales = 'free') +
+  theme_thesis() +
+  labs(x = 'Standardized Surrounding-State Score',
+       y = 'Estimated Response',
+       color = 'Standardized \nwithin-state \nscore') +
+    scale_color_brewer(palette = 'OrRd')
+ggsave('figures/eda/all_synthetic.png',
+       width = 7, height = 4)
+
+```
+
+```{r kansas_predict}
+
+# creating similar df but this time with Kansas's demographic variables for 2019
+
+ks_dummies <- tibble(surrounding_score = rep(dummy_scores, times = 3),
+                     within_score = rep(seq(-1, 1), each = length(dummy_scores)),
+                     prop_bachelors = usa@data$prop_bachelors[usa@data$NAME_1=='Kansas' & 
+                                                                usa@data$year == 2019],
+                     prop_hisp = usa@data$prop_hisp[usa@data$NAME_1=='Kansas' & 
+                                                      usa@data$year == 2019],
+                     prop_nonwhite = usa@data$prop_nonwhite[usa@data$NAME_1=='Kansas' & 
+                                                                usa@data$year == 2019],
+                     hh_income = usa@data$hh_income[usa@data$NAME_1=='Kansas' & 
+                                                                usa@data$year == 2019],
+                     dem_2party = usa@data$dem_2party[usa@data$NAME_1=='Kansas' & 
+                                                                usa@data$year == 2019],
+                     total_population = usa@data$total_population[usa@data$NAME_1=='Kansas' & 
+                                                                    usa@data$year == 2019],
+                     year = 2019)
+
+# now generating the predictions
+
+ks_predicts <- ks_dummies %>% 
+  select(within_score, surrounding_score) %>% 
+  mutate(rate = predict(rate_mod, ks_dummies)^2,
+         rate_nonres = exp(predict(rate_nonres_mod, ks_dummies)),
+         rate_res = predict(rate_res_mod, ks_dummies)^2,
+         rate_late = predict(rate_late_mod, ks_dummies)^2,
+         rate_early = predict(rate_early_mod, ks_dummies)^2,
+         prop_late = predict(prop_late_mod, ks_dummies)^2) %>% 
   pivot_longer(rate:prop_late, names_to = 'outcome') %>% 
   mutate(outcome = fct_relevel(outcome, 
                                'rate', 'rate_nonres', 'rate_res',
@@ -501,11 +584,12 @@ pred_diff_df <- dummy_df %>%
                            'rate_early' = 'Earlier-term abortions per \n1000 live births',
                            'prop_late' = 'Later-term share of \nabortions')) 
 
-# visualizing all outcomes together
+# visualizing all outcomes together... in 2019 KS had within score of 1.8 and surrounding score of 1.2
 
-pred_diff_df %>% 
+ks_predicts %>% 
   ggplot(aes(surrounding_score, value, color = as.factor(within_score))) +
   geom_line() +
+  # geom_point() +
   facet_wrap(~outcome, scales = 'free') +
   theme_thesis() +
   labs(x = 'Standardized Surrounding-State Score',
@@ -515,13 +599,7 @@ pred_diff_df %>%
 ggsave('figures/eda/all_synthetic.png',
        width = 7, height = 4)
 
-# outputting a df so I can see what the actual increases are when switching from
-# -1 to 1 surrounding-state
-
-pred_diff_df %>% 
-  filter(within_score == 1, surrounding_score %in% c(-1, 1)) %>% 
-  group_by(outcome) %>% 
-  mutate(diff = value - lag(value))
+usa@data$surrounding_score[usa@data$NAME_1=='Kansas' & usa@data$year == 2019]
 
 ```
 

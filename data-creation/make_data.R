@@ -65,7 +65,12 @@
     births <- read.delim('data-creation/raw-data/downloads/births_2007-2020.txt') %>% 
       clean_names() %>% 
       select(-c(notes, state_code, year_code))
+    
+    # change this depending on if I want to do the simpler policy scores or the
+    # reweighted policy scores
+    
     policy_scores <- read_csv('data-creation/raw-data/policy_scores.csv')
+    # policy_scores <- read_csv('data-creation/raw-data/reweighted_policy_scores.csv')
     
     # presidential data for a control variable
     
@@ -221,13 +226,13 @@
       # # getting number of abortions obtained by residents of X state in OTHER states
       # # (i.e. abortions exported to other states)
       # 
-      # exports <- abortion_long %>% 
-      #   filter(state_location != state_residence,
-      #          !str_detect(state_residence, 'Total')) %>% 
-      #   group_by(state_residence, year) %>% 
-      #   summarize(exports = sum(count, na.rm = TRUE),
-      #             .groups = 'drop') %>% 
-      #   distinct()
+      exports <- abortion_long %>%
+        filter(state_location != state_residence,
+               !str_detect(state_residence, 'Total')) %>%
+        group_by(state_residence, year) %>%
+        summarize(exports = sum(count, na.rm = TRUE),
+                  .groups = 'drop') %>%
+        distinct()
     }
     
     # abortions per 1000 births
@@ -417,7 +422,9 @@
     distinct() %>% 
     ungroup()
   
-  # writing to a csv for easy analysis
+  # writing to a csv for easy analysis (change this depending on if I'm working
+  # with simple policy scores or reweighted policy scores)
   
   write_csv(final_df, 'data-creation/raw-data/combined_data.csv')
+  # write_csv(final_df, 'data-creation/raw-data/reweighted_combined_data.csv')
 }
