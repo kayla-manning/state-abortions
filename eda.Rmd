@@ -183,7 +183,7 @@ combined %>%
   theme_classic(base_family="Times") +
   labs(x = 'Within-State Policy Score',
        y = 'Count')
-ggsave('figures/eda/within_score_hist.png',
+ggsave('figures/within_score_hist.png',
        width = 7, height = 4)
 
 # doing the same for surroundings
@@ -194,7 +194,7 @@ combined %>%
   theme_classic(base_family="Times")  +
   labs(x = 'Surrounding-State Policy Score',
        y = 'Count')
-ggsave('figures/eda/surrounding_score_hist.png',
+ggsave('figures/surrounding_score_hist.png',
        width = 7, height = 4)
 
 ```
@@ -246,7 +246,7 @@ p2 <- map_df %>%
 
 ggarrange(p1, p2,
           nrow = 2)
-ggsave('figures/eda/both_score_maps.png',
+ggsave('figures/both_score_maps.png',
        width = 8, height = 5)
 
 # creating within_all_map
@@ -267,7 +267,7 @@ map_df %>%
         axis.line = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())
-ggsave('figures/eda/within_all_map.png',
+ggsave('figures/within_all_map.png',
        width = 6, height = 5)
 
 # surrounding_all_map
@@ -287,7 +287,7 @@ map_df %>%
         axis.line = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())
-ggsave('figures/eda/surrounding_all_map.png',
+ggsave('figures/surrounding_all_map.png',
        width = 6, height = 5)
 
 ```
@@ -387,7 +387,7 @@ inner_join(reporting_terciles, all_terciles) %>%
          y = 'Surrounding-State Policy Score') +
     scale_color_brewer(palette = 'OrRd')
 }
-ggsave('figures/eda/tercile_grid.png', height = 4, width = 7)
+ggsave('figures/tercile_grid.png', height = 4, width = 7)
 
 # seeing how categories change over time
 
@@ -400,7 +400,7 @@ combined %>%
   labs(x = 'Policy Category',
        y = 'Count') +
   theme_thesis()
-ggsave('figures/eda/terciles_time.png', height = 6, width = 7)
+ggsave('figures/terciles_time.png', height = 6, width = 7)
 
 ```
 
@@ -436,7 +436,7 @@ usa@data %>%
         axis.line = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())
- ggsave('figures/eda/overall_rate_map.png', 
+ ggsave('figures/overall_rate_map.png', 
         width = 7, height = 2)
 
 ```
@@ -483,7 +483,7 @@ map_df %>%
         axis.line = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())
- ggsave('figures/eda/nonres_rate_map.png', 
+ ggsave('figures/nonres_rate_map.png', 
         width = 7, height = 2)
  
  # repeating for resident abortion rate
@@ -504,7 +504,7 @@ map_df %>%
         axis.line = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())
- ggsave('figures/eda/res_rate_map.png', 
+ ggsave('figures/res_rate_map.png', 
         width = 7, height = 2)
  
 model_map_df %>% 
@@ -564,7 +564,7 @@ combined %>%
         axis.line = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())
- ggsave('figures/eda/late_rate_map.png', 
+ ggsave('figures/late_rate_map.png', 
         width = 7, height = 2)
  
  # mapping earlier-term abortion rates
@@ -585,7 +585,7 @@ combined %>%
         axis.line = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())
- ggsave('figures/eda/early_rate_map.png', 
+ ggsave('figures/early_rate_map.png', 
         width = 7, height = 2)
  
 # now looking at the later-term share of abortions
@@ -606,7 +606,7 @@ map_df %>%
         axis.line = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())
- ggsave('figures/eda/late_share_map.png', 
+ ggsave('figures/late_share_map.png', 
         width = 7, height = 2)
 
 ```
@@ -981,6 +981,14 @@ sept2022 %>%
                                '#FFE787',
                                '#D64933',
                                '#53131E')) +
+  # scale_fill_viridis(option = 'magma',
+  #                    discrete = TRUE,
+  #                    breaks = c('Expanded Access',
+  #                              'Protected',
+  #                              'Not Protected',
+  #                              'Hostile',
+  #                              'Illegal'),
+  #                    direction = -1) +
   labs(fill = '') +
   theme_grey(base_family = 'Times') +
   theme(panel.background = element_blank(),
@@ -989,7 +997,7 @@ sept2022 %>%
         axis.ticks = element_blank(),
         axis.title = element_blank())
 
-ggsave('figures/eda/dobbs_map.png',
+ggsave('figures/dobbs_map.png',
        width = 7, height = 2)
 
 ```
@@ -1004,11 +1012,21 @@ clinics <- read_sheet('https://docs.google.com/spreadsheets/d/1fs9IIEJaZjr4O1pQC
 clinics %>% 
   mutate(state = tolower(state)) %>% 
   left_join(states, by = c('state' = 'region')) %>%
+  mutate(clinic_range = case_when(pct_without_clinic < 50 ~ '<50%',
+                                  pct_without_clinic >= 50 &
+                                    pct_without_clinic < 90 ~ '50%-89%',
+                                  pct_without_clinic >= 90 &
+                                    pct_without_clinic < 95 ~ '90-94%',
+                                  pct_without_clinic >= 95 ~ '95%+')) %>% 
+  drop_na(clinic_range) %>% 
   ggplot() +
   geom_polygon(aes(long, lat, group = group, 
-                   fill = pct_without_clinic),
+                   fill = clinic_range),
                color = 'black') +
-  scale_fill_gradient2(high = crimson) +
+  scale_fill_manual(values = c('#CDEDF6',
+                               '#FFE787',
+                               '#D64933',
+                               '#53131E')) +
   coord_fixed(1.2) +
   labs(fill = 'Counties Without an \nAbortion Clinic (%)') +
   theme_grey(base_family = 'Times') +
@@ -1017,18 +1035,18 @@ clinics %>%
         axis.line = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank())
-ggsave('figures/eda/clinic_map.png',
+ggsave('figures/clinic_map.png',
        width = 7, height = 3)
 
 clinics %>% 
   mutate(report = ifelse(state %in% usa@data$NAME_1, 'Reporting', 'Nonreporting')) %>% 
   ggplot(aes(report, pct_without_clinic)) +
-  geom_boxplot(fill = crimson) +
+  geom_boxplot(fill = 'darkgray') +
   theme_thesis() +
   labs(x = 'CDC Reporting Status',
        y = 'Counties Without an Abortion Clinic (%)')
-ggsave('figures/eda/clinic_boxplot.png',
-       width = 6, height = 4)
+ggsave('figures/clinic_boxplot.png',
+       width = 5, height = 3)
 
 ```
 
