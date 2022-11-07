@@ -1,7 +1,7 @@
 # Abortion Policy Spillover: When Policy Consequences Contradict the Intent
 ## Kayla Manning
 
-This repository contains the code for my joint thesis in Statistics and Government. You can read the final draft at [`final_thesis.pdf`](final_thesis.pdf).
+This repository contains the code for my joint thesis in Statistics and Government. You can read the final draft at [`thesis_final.pdf`](thesis_final.pdf).
 
 ## Important files / directories
 
