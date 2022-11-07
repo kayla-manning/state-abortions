@@ -88,7 +88,7 @@ knitr::opts_chunk$set(message = FALSE,
 
 # data with everything combined
 
-combined <- read_csv('data-creation/raw-data/reweighted_combined_data.csv') %>% 
+combined <- read_csv('data-creation/raw-data/combined_data.csv') %>% 
   mutate(within_between = fct_relevel(within_between,
                                      'low-low', 'low-med', 'low-high', 
                                      'med-low', 'med-med', 'med-high', 
@@ -221,7 +221,10 @@ p1 <- map_df %>%
         axis.ticks = element_blank(),
         axis.title = element_blank(),
         legend.position = 'bottom',
-        legend.key.height = unit(0.2, "cm"))
+        legend.key.height = unit(0.2, "cm"),
+        strip.text.x = element_text(size = 11),
+        legend.title = element_text(size = 13),
+        legend.text = element_text(size = 10))
 
 p2 <- map_df %>% 
   filter(year %in% c(2010, 2019)) %>%
@@ -240,7 +243,10 @@ p2 <- map_df %>%
         axis.ticks = element_blank(),
         axis.title = element_blank(),
         legend.position = 'bottom',
-        legend.key.height = unit(0.2, "cm"))
+        legend.key.height = unit(0.2, "cm"),
+        strip.text.x = element_text(size = 11),
+        legend.title = element_text(size = 13),
+        legend.text = element_text(size = 10))
 
 # saving a printout of the two maps together
 

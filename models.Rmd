@@ -66,70 +66,6 @@ source('model-helpers/model_helper_lme.R')
 
 ## Testing for Spatial Autocorrelation
 
-```{r maps}
-
-# producing 2010 vs 2019 plots for each of our 3 response variables
-
-p1 <- map_df %>% 
-  filter(year %in% c(2010, 2019)) %>% 
-  ggplot() +
-  geom_polygon(aes(long, lat, group = group, fill = abortion_per_1k_births),
-               color = 'black') +
-  scale_fill_gradient2(high = 'red3') +
-  coord_fixed(1.2) +
-  facet_wrap(~year) +
-  labs(title = 'Abortion Rate',
-       fill = '') +
-  theme(panel.background = element_blank(),
-        axis.text = element_blank(),
-        axis.line = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title = element_blank())
-
-# nonres rate
-
-p2 <- map_df %>% 
-  filter(year %in% c(2010, 2019)) %>% 
-  ggplot() +
-  geom_polygon(aes(long, lat, group = group, fill = rate_nonres),
-               color = 'black') +
-  scale_fill_gradient2(high = 'red3') +
-  coord_fixed(1.2) +
-  facet_wrap(~year) +
-  labs(title = 'Nonresident Abortion Rate',
-       fill = '') +
-  theme(panel.background = element_blank(),
-        axis.text = element_blank(),
-        axis.line = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title = element_blank())
-
-# late rate
-
-p3 <- map_df %>% 
-  filter(year %in% c(2010, 2019)) %>% 
-  ggplot() +
-  geom_polygon(aes(long, lat, group = group, fill = rate_late),
-               color = 'black') +
-  scale_fill_gradient2(high = 'red3') +
-  coord_fixed(1.2) +
-  facet_wrap(~year) +
-  labs(title = 'Later-term Abortion Rate',
-       fill = '') +
-  theme(panel.background = element_blank(),
-        axis.text = element_blank(),
-        axis.line = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title = element_blank())
-
-# putting plots together
-
-ggarrange(p1, p2, p3, nrow = 3) %>% 
-  annotate_figure(top = text_grob('Spatial structure in outcome variables', 
-                                  size = 14))
-
-```
-
 ```{r global_morans}
 
 # extracting model weight & preparing listws for moran tests
@@ -549,7 +485,6 @@ ggsave('figures/all_synthetic.png',
 
 ```
 
-
 ## Model diagnostics
 
 ```{r all_residual_morans}
@@ -614,9 +549,18 @@ do.call(rbind, lapply(moran_results, tidy)) %>%
 
 # writing a function to produce model residual map for a specified year
 
-get_resid_map <- function(mod, year) {
+get_resid_map <- function(mod, year, var) {
+  
+  resids <- case_when(var == 'overall' ~ 
+                        mod$fitted[,1]^2 - usa@data$abortion_per_1k_births,
+                      var == 'early' ~
+                        mod$fitted[,1]^2 - usa@data$rate_early,
+                      var == 'res' ~
+                        mod$fitted[,1]^2 - usa@data$rate_res,
+                      var == 'nonres' ~
+                        exp(mod$fitted[,1]) - usa@data$rate_nonres)
   usa@data %>% 
-    mutate(resids = residuals(mod),
+    mutate(resids = resids,
            NAME_1 = str_to_lower(NAME_1)) %>% 
     inner_join(states, by = c('NAME_1' = 'region')) %>%
     filter(year == year) %>% 
@@ -624,7 +568,7 @@ get_resid_map <- function(mod, year) {
     geom_polygon(aes(long, lat, group=group, fill = resids),
                  color = 'black') +
     scale_fill_distiller(palette = 'Spectral',
-                         limits = c(-6, 4)) +
+                         limits = c(-120, 120)) +
     coord_fixed(1.2) +
     theme_thesis() +
     theme(panel.background = element_blank(),
@@ -643,13 +587,13 @@ get_resid_map <- function(mod, year) {
 # - resident rate: 2012
 # - earlier-term rate: 2012-2015
 
-p1 <- get_resid_map(rate_mod, 2012) +
+p1 <- get_resid_map(rate_mod, 2012, var = 'overall') +
   labs(fill = 'Overall Rate Residuals, 2012')
-p2 <- get_resid_map(rate_nonres_mod, 2010) +
+p2 <- get_resid_map(rate_nonres_mod, 2010, var = 'nonres') +
   labs(fill = 'Nonresident Rate Residuals, 2010')
-p3 <- get_resid_map(rate_res_mod, 2012) +
+p3 <- get_resid_map(rate_res_mod, 2012, var = 'res') +
   labs(fill = 'Resident Rate Residuals, 2012')
-p4 <- get_resid_map(rate_early_mod, 2012) +
+p4 <- get_resid_map(rate_early_mod, 2012, var = 'early') +
   labs(fill = 'Earlier-Term Rate Residuals, 2012')
 ggarrange(p1, p3, p4, p2, nrow = 2, ncol = 2)
 ggsave('figures/resid_maps.png',

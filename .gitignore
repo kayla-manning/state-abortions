@@ -21,6 +21,9 @@
 .Rproj.user/
 *.Rproj
 
+# extra
+*.rds
+
 # produced vignettes
 vignettes/*.html
 vignettes/*.pdf
