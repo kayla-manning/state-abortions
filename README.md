@@ -18,7 +18,4 @@ This directory contains the scripts used to scrape, clean, and merge datasets. I
 ### [`figures`](figures)
 This directory contains all maps and charts included in the final thesis. I generate the tables with `kable` LaTeX code, so they are not included in this directory.
 
-### [`archive`](archive)
-This directory contains files that aren't being directly used but contain some code that might be useful in the future.
-
 
